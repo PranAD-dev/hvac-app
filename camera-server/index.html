@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HVAC Glasses — Camera Source</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0F172A;
+      color: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      text-align: center;
+      max-width: 720px;
+      width: 100%;
+      padding: 20px;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #94A3B8;
+      margin-bottom: 4px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    h2 {
+      font-size: 14px;
+      font-weight: 400;
+      color: #475569;
+      margin-bottom: 24px;
+    }
+    video {
+      width: 100%;
+      max-width: 640px;
+      border-radius: 16px;
+      background: #1E293B;
+    }
+    canvas { display: none; }
+    .stats {
+      margin-top: 16px;
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: #64748B;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      display: inline-block;
+    }
+    .status.connected { background: #16A34A20; color: #16A34A; }
+    .status.disconnected { background: #DC262620; color: #DC2626; }
+    .status.waiting { background: #CA8A0420; color: #CA8A04; }
+    .controls {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+    }
+    select, button {
+      background: #1E293B;
+      color: #fff;
+      border: 1px solid #334155;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>HVAC Smart Glasses</h1>
+    <h2>Camera Source — Simulating glasses camera feed</h2>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="controls">
+      <select id="quality">
+        <option value="0.5">Low Quality (faster)</option>
+        <option value="0.7" selected>Medium Quality</option>
+        <option value="0.85">High Quality (slower)</option>
+      </select>
+      <select id="fps">
+        <option value="5">5 FPS</option>
+        <option value="10" selected>10 FPS</option>
+        <option value="15">15 FPS</option>
+        <option value="24">24 FPS</option>
+      </select>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="clientCount">0</div>
+        <div class="stat-label">Viewers</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="frameCount">0</div>
+        <div class="stat-label">Frames Sent</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="dataRate">0</div>
+        <div class="stat-label">KB/s</div>
+      </div>
+    </div>
+
+    <div id="statusBadge" class="status disconnected">Disconnected</div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusBadge = document.getElementById('statusBadge');
+    const qualitySelect = document.getElementById('quality');
+    const fpsSelect = document.getElementById('fps');
+
+    let ws = null;
+    let framesSent = 0;
+    let bytesSent = 0;
+    let lastByteCheck = 0;
+    let sendInterval = null;
+
+    // Start camera
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'environment' },
+          audio: false
+        });
+        video.srcObject = stream;
+        statusBadge.textContent = 'Camera ready — connecting...';
+        statusBadge.className = 'status waiting';
+        connectWS();
+      } catch (err) {
+        statusBadge.textContent = 'Camera access denied';
+        statusBadge.className = 'status disconnected';
+        console.error('Camera error:', err);
+      }
+    }
+
+    function connectWS() {
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${protocol}://${location.host}?role=camera`);
+
+      ws.onopen = () => {
+        statusBadge.textContent = 'Streaming';
+        statusBadge.className = 'status connected';
+        startStreaming();
+      };
+
+      ws.onclose = () => {
+        statusBadge.textContent = 'Disconnected — reconnecting...';
+        statusBadge.className = 'status disconnected';
+        stopStreaming();
+        setTimeout(connectWS, 2000);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    function startStreaming() {
+      stopStreaming();
+      const fps = parseInt(fpsSelect.value);
+      const interval = Math.floor(1000 / fps);
+
+      sendInterval = setInterval(() => {
+        if (ws?.readyState !== 1) return;
+        if (video.videoWidth === 0) return;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+
+        const quality = parseFloat(qualitySelect.value);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        ws.send(dataUrl);
+        framesSent++;
+        bytesSent += dataUrl.length;
+
+        document.getElementById('frameCount').textContent = framesSent;
+      }, interval);
+    }
+
+    function stopStreaming() {
+      if (sendInterval) {
+        clearInterval(sendInterval);
+        sendInterval = null;
+      }
+    }
+
+    // Update data rate display
+    setInterval(() => {
+      const kbps = ((bytesSent - lastByteCheck) / 1024).toFixed(1);
+      document.getElementById('dataRate').textContent = kbps;
+      lastByteCheck = bytesSent;
+    }, 1000);
+
+    // Restart streaming on settings change
+    qualitySelect.addEventListener('change', startStreaming);
+    fpsSelect.addEventListener('change', startStreaming);
+
+    startCamera();
+  </script>
+</body>
+</html>

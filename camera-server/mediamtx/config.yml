@@ -1,0 +1,36 @@
+# HVAC Glasses Camera — mediamtx config
+# RTMP ingest + HLS playback (same architecture as MentraOS → Cloudflare)
+
+logLevel: info
+logDestinations: [stdout]
+
+# API
+api: yes
+apiAddress: :9997
+
+# RTMP — laptop pushes camera here
+rtmp: yes
+rtmpAddress: :1935
+
+# HLS — phone plays from here
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: '*'
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 500ms
+hlsSegmentMaxSize: 50M
+
+# WebRTC (optional, lower latency than HLS)
+webrtc: yes
+webrtcAddress: :8889
+
+# Disable stuff we don't need
+rtsp: no
+srt: no
+
+# Accept any stream pushed to /live/*
+paths:
+  "live/hvac":
+    source: publisher
