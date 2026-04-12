@@ -34,6 +34,14 @@ const AVAILABLE_CATEGORIES = [
   { id: "customer", label: "Customer Note", icon: "user" as const, color: "#1E3A5F" },
 ];
 
+const REMINDER_PRESETS = [
+  { label: "In 1 hour", hours: 1 },
+  { label: "In 4 hours", hours: 4 },
+  { label: "Tomorrow morning", hours: 24 },
+  { label: "In 2 days", hours: 48 },
+  { label: "Next week", hours: 168 },
+];
+
 const AI_ACTIONS = [
   {
     id: "summarize",
@@ -87,6 +95,9 @@ export default function NoteDetailScreen() {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>(note?.category || "");
 
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [reminderSet, setReminderSet] = useState<string>(note?.reminder || "");
+
   if (!job || !note) {
     return (
       <View
@@ -125,6 +136,20 @@ export default function NoteDetailScreen() {
     setSelectedCategory(newCat);
     await updateNoteMetadata(jobId, noteId, { category: newCat });
     setShowCategoryModal(false);
+  };
+
+  const handleSetReminder = async (hours: number, label: string) => {
+    const reminderDate = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    setReminderSet(reminderDate);
+    await updateNoteMetadata(jobId, noteId, { reminder: reminderDate });
+    setShowReminderModal(false);
+    Alert.alert("Reminder Set", `You'll be reminded ${label.toLowerCase()}.`);
+  };
+
+  const handleClearReminder = async () => {
+    setReminderSet("");
+    await updateNoteMetadata(jobId, noteId, { reminder: "" });
+    setShowReminderModal(false);
   };
 
   const activeCategory = AVAILABLE_CATEGORIES.find((c) => c.id === selectedCategory);
@@ -259,23 +284,43 @@ export default function NoteDetailScreen() {
             </View>
           )}
 
-          {/* Category Display */}
-          {activeCategory && (
+          {/* Category & Reminder Display */}
+          {(activeCategory || reminderSet) && (
             <View style={{ flexDirection: "row", paddingHorizontal: 20, paddingTop: 8, gap: 8 }}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  backgroundColor: activeCategory.color + "14",
-                  borderRadius: 12,
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                }}
-              >
-                <FontAwesome name={activeCategory.icon} size={10} color={activeCategory.color} />
-                <Text style={{ fontSize: 12, color: activeCategory.color, fontWeight: "500" }}>{activeCategory.label}</Text>
-              </View>
+              {activeCategory && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    backgroundColor: activeCategory.color + "14",
+                    borderRadius: 12,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                  }}
+                >
+                  <FontAwesome name={activeCategory.icon} size={10} color={activeCategory.color} />
+                  <Text style={{ fontSize: 12, color: activeCategory.color, fontWeight: "500" }}>{activeCategory.label}</Text>
+                </View>
+              )}
+              {reminderSet && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    backgroundColor: "#F0FDF4",
+                    borderRadius: 12,
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                  }}
+                >
+                  <FontAwesome name="bell" size={10} color="#0D9488" />
+                  <Text style={{ fontSize: 12, color: "#0D9488", fontWeight: "500" }}>
+                    {new Date(reminderSet).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -331,23 +376,24 @@ export default function NoteDetailScreen() {
               </Text>
             </Pressable>
             <Pressable
+              onPress={() => setShowReminderModal(true)}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
                 borderWidth: 1,
-                borderColor: "#E5E7EB",
+                borderColor: reminderSet ? "#0D9488" : "#E5E7EB",
                 borderRadius: 20,
                 paddingHorizontal: 14,
                 paddingVertical: 8,
-                backgroundColor: "#FFFFFF",
+                backgroundColor: reminderSet ? "#F0FDF4" : "#FFFFFF",
               }}
             >
-              <FontAwesome name="clock-o" size={14} color="#0D9488" />
+              <FontAwesome name={reminderSet ? "bell" : "clock-o"} size={14} color="#0D9488" />
               <Text
-                style={{ fontSize: 13, color: "#374151", fontWeight: "500" }}
+                style={{ fontSize: 13, color: reminderSet ? "#0D9488" : "#374151", fontWeight: "500" }}
               >
-                Reminder
+                {reminderSet ? "Reminder Set" : "Reminder"}
               </Text>
             </Pressable>
           </View>
@@ -569,6 +615,71 @@ export default function NoteDetailScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Reminder Modal */}
+      <Modal visible={showReminderModal} transparent animationType="slide">
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" }}
+          onPress={() => setShowReminderModal(false)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: "#FFFFFF",
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              padding: 24,
+            }}
+          >
+            <Text style={{ fontSize: 20, fontWeight: "700", color: "#111827", marginBottom: 20 }}>Set Reminder</Text>
+            <View style={{ gap: 10 }}>
+              {REMINDER_PRESETS.map((preset) => (
+                <Pressable
+                  key={preset.label}
+                  onPress={() => handleSetReminder(preset.hours, preset.label)}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: 14,
+                    borderRadius: 14,
+                    backgroundColor: pressed ? "#F3F4F6" : "#FFFFFF",
+                    borderWidth: 1,
+                    borderColor: "#E5E7EB",
+                  })}
+                >
+                  <View
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 10,
+                      backgroundColor: "#F0FDF4",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <FontAwesome name="clock-o" size={16} color="#0D9488" />
+                  </View>
+                  <Text style={{ fontSize: 15, fontWeight: "500", color: "#374151", flex: 1 }}>{preset.label}</Text>
+                  <FontAwesome name="chevron-right" size={12} color="#D1D5DB" />
+                </Pressable>
+              ))}
+              {reminderSet && (
+                <Pressable
+                  onPress={handleClearReminder}
+                  style={{
+                    alignItems: "center",
+                    padding: 14,
+                    borderRadius: 14,
+                    marginTop: 4,
+                  }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: "600", color: "#DC2626" }}>Clear Reminder</Text>
+                </Pressable>
+              )}
             </View>
           </Pressable>
         </Pressable>
