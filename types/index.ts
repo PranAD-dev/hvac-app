@@ -128,6 +128,9 @@ export interface Note {
   source: "manual" | "vision";
   created_at: string;
   created_by: string;
+  tags?: string[];
+  category?: string;
+  reminder?: string;
 }
 
 export interface Clip {

@@ -21,6 +21,8 @@ interface JobStore {
   getJobsBySerialNumber: (serial: string) => Job[];
   searchJobs: (query: string) => Job[];
   addNote: (jobId: string, text: string, source: "manual" | "vision", createdBy: string) => Promise<void>;
+  updateNote: (jobId: string, noteId: string, text: string) => Promise<void>;
+  updateNoteMetadata: (jobId: string, noteId: string, meta: { tags?: string[]; category?: string; reminder?: string }) => Promise<void>;
   deleteNote: (jobId: string, noteId: string) => Promise<void>;
   addClip: (jobId: string, filePath: string, durationSeconds: number, caption: string, recordedBy: string, thumbnailPath?: string) => Promise<void>;
   deleteClip: (jobId: string, clipId: string) => Promise<void>;
@@ -112,6 +114,26 @@ export const useJobStore = create<JobStore>((set, get) => ({
     };
     const updated = get().jobs.map((j) =>
       j.id === jobId ? { ...j, notes: [note, ...(j.notes || [])] } : j
+    );
+    set({ jobs: updated });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  },
+
+  updateNote: async (jobId, noteId, text) => {
+    const updated = get().jobs.map((j) =>
+      j.id === jobId
+        ? { ...j, notes: (j.notes || []).map((n) => n.id === noteId ? { ...n, text } : n) }
+        : j
+    );
+    set({ jobs: updated });
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  },
+
+  updateNoteMetadata: async (jobId, noteId, meta) => {
+    const updated = get().jobs.map((j) =>
+      j.id === jobId
+        ? { ...j, notes: (j.notes || []).map((n) => n.id === noteId ? { ...n, ...meta } : n) }
+        : j
     );
     set({ jobs: updated });
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
