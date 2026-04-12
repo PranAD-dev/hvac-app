@@ -25,6 +25,15 @@ const AVAILABLE_TAGS = [
   "Inspection",
 ];
 
+const AVAILABLE_CATEGORIES = [
+  { id: "inspection", label: "Inspection", icon: "eye" as const, color: "#2563EB" },
+  { id: "repair", label: "Repair", icon: "wrench" as const, color: "#DC2626" },
+  { id: "installation", label: "Installation", icon: "plus-circle" as const, color: "#7C3AED" },
+  { id: "maintenance", label: "Maintenance", icon: "cogs" as const, color: "#EA580C" },
+  { id: "diagnosis", label: "Diagnosis", icon: "stethoscope" as const, color: "#0D9488" },
+  { id: "customer", label: "Customer Note", icon: "user" as const, color: "#1E3A5F" },
+];
+
 const AI_ACTIONS = [
   {
     id: "summarize",
@@ -75,6 +84,9 @@ export default function NoteDetailScreen() {
   const [showTagModal, setShowTagModal] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>(note?.tags || []);
 
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>(note?.category || "");
+
   if (!job || !note) {
     return (
       <View
@@ -107,6 +119,15 @@ export default function NoteDetailScreen() {
     await updateNoteMetadata(jobId, noteId, { tags: selectedTags });
     setShowTagModal(false);
   };
+
+  const handleSaveCategory = async (catId: string) => {
+    const newCat = catId === selectedCategory ? "" : catId;
+    setSelectedCategory(newCat);
+    await updateNoteMetadata(jobId, noteId, { category: newCat });
+    setShowCategoryModal(false);
+  };
+
+  const activeCategory = AVAILABLE_CATEGORIES.find((c) => c.id === selectedCategory);
 
   return (
     <>
@@ -238,6 +259,26 @@ export default function NoteDetailScreen() {
             </View>
           )}
 
+          {/* Category Display */}
+          {activeCategory && (
+            <View style={{ flexDirection: "row", paddingHorizontal: 20, paddingTop: 8, gap: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  backgroundColor: activeCategory.color + "14",
+                  borderRadius: 12,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                }}
+              >
+                <FontAwesome name={activeCategory.icon} size={10} color={activeCategory.color} />
+                <Text style={{ fontSize: 12, color: activeCategory.color, fontWeight: "500" }}>{activeCategory.label}</Text>
+              </View>
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View
             style={{
@@ -269,23 +310,24 @@ export default function NoteDetailScreen() {
               </Text>
             </Pressable>
             <Pressable
+              onPress={() => setShowCategoryModal(true)}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
                 borderWidth: 1,
-                borderColor: "#E5E7EB",
+                borderColor: selectedCategory ? "#16A34A" : "#E5E7EB",
                 borderRadius: 20,
                 paddingHorizontal: 14,
                 paddingVertical: 8,
-                backgroundColor: "#FFFFFF",
+                backgroundColor: selectedCategory ? "#F0FDF4" : "#FFFFFF",
               }}
             >
               <FontAwesome name="folder-open" size={13} color="#16A34A" />
               <Text
-                style={{ fontSize: 13, color: "#374151", fontWeight: "500" }}
+                style={{ fontSize: 13, color: selectedCategory ? "#16A34A" : "#374151", fontWeight: "500" }}
               >
-                Add Category
+                {activeCategory ? activeCategory.label : "Add Category"}
               </Text>
             </Pressable>
             <Pressable
@@ -469,6 +511,61 @@ export default function NoteDetailScreen() {
                   >
                     <FontAwesome name={isActive ? "check-circle" : "circle-o"} size={14} color={isActive ? "#2563EB" : "#9CA3AF"} />
                     <Text style={{ fontSize: 14, fontWeight: "500", color: isActive ? "#2563EB" : "#374151" }}>{tag}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Category Selection Modal */}
+      <Modal visible={showCategoryModal} transparent animationType="slide">
+        <Pressable
+          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" }}
+          onPress={() => setShowCategoryModal(false)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: "#FFFFFF",
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              padding: 24,
+            }}
+          >
+            <Text style={{ fontSize: 20, fontWeight: "700", color: "#111827", marginBottom: 20 }}>Select Category</Text>
+            <View style={{ gap: 10 }}>
+              {AVAILABLE_CATEGORIES.map((cat) => {
+                const isActive = selectedCategory === cat.id;
+                return (
+                  <Pressable
+                    key={cat.id}
+                    onPress={() => handleSaveCategory(cat.id)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 14,
+                      borderRadius: 14,
+                      borderWidth: 1.5,
+                      borderColor: isActive ? cat.color : "#E5E7EB",
+                      backgroundColor: isActive ? cat.color + "0D" : "#FFFFFF",
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: cat.color + "14",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <FontAwesome name={cat.icon} size={16} color={cat.color} />
+                    </View>
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: isActive ? cat.color : "#374151", flex: 1 }}>{cat.label}</Text>
+                    {isActive && <FontAwesome name="check-circle" size={18} color={cat.color} />}
                   </Pressable>
                 );
               })}
