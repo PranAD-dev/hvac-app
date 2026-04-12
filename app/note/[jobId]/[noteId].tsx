@@ -9,10 +9,45 @@ import {
   Platform,
   ScrollView,
   Modal,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { useJobStore } from "../../../store/jobStore";
 import { FontAwesome } from "@expo/vector-icons";
+
+function summarizeText(text: string): string {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  if (sentences.length <= 2) return text;
+  const kept = sentences.slice(0, Math.ceil(sentences.length / 2));
+  return kept.join("").trim();
+}
+
+function rewriteForClarity(text: string): string {
+  let result = text.trim();
+  result = result.replace(/\s+/g, " ");
+  result = result.replace(/(^|[.!?]\s+)([a-z])/g, (_, p, c) => p + c.toUpperCase());
+  if (result && !/[.!?]$/.test(result)) result += ".";
+  return result;
+}
+
+function convertToBullets(text: string): string {
+  const sentences = text.match(/[^.!?]+[.!?]+/g);
+  if (!sentences || sentences.length <= 1) {
+    const lines = text.split(/\n+/).filter((l) => l.trim());
+    if (lines.length <= 1) return "• " + text.trim();
+    return lines.map((l) => "• " + l.trim()).join("\n");
+  }
+  return sentences.map((s) => "• " + s.trim()).join("\n");
+}
+
+function generateTitle(text: string): string {
+  const words = text.replace(/[^a-zA-Z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  const stop = new Set(["the", "a", "an", "is", "are", "was", "were", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "it", "this", "that"]);
+  const meaningful = words.filter((w) => !stop.has(w.toLowerCase()));
+  const titleWords = meaningful.slice(0, 5);
+  if (titleWords.length === 0) return "Untitled Note";
+  return titleWords.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
 
 const AVAILABLE_TAGS = [
   "Urgent",
@@ -98,6 +133,8 @@ export default function NoteDetailScreen() {
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [reminderSet, setReminderSet] = useState<string>(note?.reminder || "");
 
+  const [aiProcessing, setAiProcessing] = useState<string | null>(null);
+
   if (!job || !note) {
     return (
       <View
@@ -150,6 +187,38 @@ export default function NoteDetailScreen() {
     setReminderSet("");
     await updateNoteMetadata(jobId, noteId, { reminder: "" });
     setShowReminderModal(false);
+  };
+
+  const handleAiAction = async (actionId: string) => {
+    if (!text.trim()) {
+      Alert.alert("No Content", "Write some notes first before using AI assist.");
+      return;
+    }
+    setAiProcessing(actionId);
+    await new Promise((r) => setTimeout(r, 600));
+
+    let newText = text;
+    switch (actionId) {
+      case "summarize":
+        newText = summarizeText(text);
+        break;
+      case "rewrite":
+        newText = rewriteForClarity(text);
+        break;
+      case "bullets":
+        newText = convertToBullets(text);
+        break;
+      case "title": {
+        const generated = generateTitle(text);
+        setTitle(generated);
+        setAiProcessing(null);
+        setEdited(true);
+        return;
+      }
+    }
+    setText(newText);
+    setEdited(true);
+    setAiProcessing(null);
   };
 
   const activeCategory = AVAILABLE_CATEGORIES.find((c) => c.id === selectedCategory);
@@ -428,14 +497,16 @@ export default function NoteDetailScreen() {
                 {AI_ACTIONS.slice(0, 2).map((action) => (
                   <Pressable
                     key={action.id}
-                    style={{
+                    onPress={() => handleAiAction(action.id)}
+                    style={({ pressed }) => ({
                       flex: 1,
                       backgroundColor: "#FFFFFF",
                       borderRadius: 16,
                       padding: 16,
                       minHeight: 120,
                       justifyContent: "space-between",
-                    }}
+                      opacity: pressed ? 0.7 : 1,
+                    })}
                   >
                     <View
                       style={{
@@ -447,11 +518,15 @@ export default function NoteDetailScreen() {
                         justifyContent: "center",
                       }}
                     >
-                      <FontAwesome
-                        name={action.icon}
-                        size={18}
-                        color={action.iconColor}
-                      />
+                      {aiProcessing === action.id ? (
+                        <ActivityIndicator size="small" color={action.iconColor} />
+                      ) : (
+                        <FontAwesome
+                          name={action.icon}
+                          size={18}
+                          color={action.iconColor}
+                        />
+                      )}
                     </View>
                     <Text
                       style={{
@@ -471,14 +546,16 @@ export default function NoteDetailScreen() {
                 {AI_ACTIONS.slice(2, 4).map((action) => (
                   <Pressable
                     key={action.id}
-                    style={{
+                    onPress={() => handleAiAction(action.id)}
+                    style={({ pressed }) => ({
                       flex: 1,
                       backgroundColor: "#FFFFFF",
                       borderRadius: 16,
                       padding: 16,
                       minHeight: 120,
                       justifyContent: "space-between",
-                    }}
+                      opacity: pressed ? 0.7 : 1,
+                    })}
                   >
                     <View
                       style={{
@@ -490,11 +567,15 @@ export default function NoteDetailScreen() {
                         justifyContent: "center",
                       }}
                     >
-                      <FontAwesome
-                        name={action.icon}
-                        size={18}
-                        color={action.iconColor}
-                      />
+                      {aiProcessing === action.id ? (
+                        <ActivityIndicator size="small" color={action.iconColor} />
+                      ) : (
+                        <FontAwesome
+                          name={action.icon}
+                          size={18}
+                          color={action.iconColor}
+                        />
+                      )}
                     </View>
                     <Text
                       style={{
