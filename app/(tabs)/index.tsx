@@ -1,291 +1,423 @@
-import React from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   Pressable,
   ActivityIndicator,
-  Share,
+  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useJobStore } from "../../store/jobStore";
-import { Job } from "../../types";
 import { FontAwesome } from "@expo/vector-icons";
+import { useJobStore } from "../../store/jobStore";
+import GlassesViewer from "../../components/GlassesViewer";
 
-function getUrgencyColor(urgency: string) {
-  switch (urgency) {
-    case "emergency":
-      return "#DC2626";
-    case "urgent":
-      return "#EA580C";
-    case "routine":
-      return "#16A34A";
-    default:
-      return "#6B7280";
-  }
-}
+/* ── Clips grid item ─────────────────────────────────────────── */
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function isToday(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  return d.toDateString() === now.toDateString();
-}
-
-function JobCard({ job, onPress }: { job: Job; onPress: () => void }) {
-  const urgencyColor = getUrgencyColor(job.diagnosis.urgency);
-
-  const handleLongPress = async () => {
-    if (!job.service_report) return;
-    try {
-      await Share.share({
-        message: `Service Report\n${job.customer_name} — ${job.customer_address}\n\n${job.service_report}`,
-      });
-    } catch {}
-  };
-
+function ClipThumb({
+  caption,
+  duration,
+  onPress,
+}: {
+  caption: string;
+  duration: number;
+  onPress: () => void;
+}) {
+  const fmt =
+    Math.floor(duration / 60) + ":" + (duration % 60).toString().padStart(2, "0");
   return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={handleLongPress}
-      className="bg-white mx-4 mb-3 rounded-2xl overflow-hidden"
-      style={{
-        shadowColor: "#0F172A",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        elevation: 3,
-      }}
-    >
-      {/* Accent top border */}
-      <View style={{ height: 3, backgroundColor: urgencyColor }} />
-
-      <View className="p-4">
-        <View className="flex-row items-start justify-between">
-          <View className="flex-1 mr-3">
-            <Text className="text-base font-bold text-slate-900" numberOfLines={1}>
-              {job.customer_name}
-            </Text>
-            <Text className="text-sm text-slate-500 mt-0.5" numberOfLines={1}>
-              {job.customer_address}
-            </Text>
-          </View>
-          {job.status === "in_progress" ? (
-            <View className="flex-row items-center bg-blue-50 px-2.5 py-1 rounded-full">
-              <View className="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5" />
-              <Text className="text-xs font-bold text-blue-600">LIVE</Text>
-            </View>
-          ) : (
-            <View
-              className="px-2.5 py-1 rounded-full"
-              style={{ backgroundColor: urgencyColor + "14" }}
-            >
-              <Text
-                className="text-xs font-bold capitalize"
-                style={{ color: urgencyColor }}
-              >
-                {job.diagnosis.urgency}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Unit tags */}
-        <View className="flex-row items-center mt-3 flex-wrap gap-1.5">
-          {job.source === "jobber" && (
-            <View className="bg-green-50 px-2.5 py-1 rounded-lg flex-row items-center">
-              <FontAwesome name="calendar-check-o" size={9} color="#16A34A" />
-              <Text className="text-xs font-bold text-green-600 ml-1">Jobber</Text>
-            </View>
-          )}
-          {job.unit.brand ? (
-            <View className="bg-slate-100 px-2.5 py-1 rounded-lg">
-              <Text className="text-xs font-semibold text-slate-700">
-                {job.unit.brand}
-              </Text>
-            </View>
-          ) : null}
-          <View className="bg-slate-50 px-2 py-1 rounded-lg">
-            <Text className="text-xs text-slate-500">
-              {job.unit.tonnage}T
-            </Text>
-          </View>
-          <View className="bg-slate-50 px-2 py-1 rounded-lg">
-            <Text className="text-xs text-slate-500">
-              {job.unit.system_type}
-            </Text>
-          </View>
-          <View className="bg-slate-50 px-2 py-1 rounded-lg">
-            <Text className="text-xs text-slate-500">
-              {job.unit.refrigerant_type}
-            </Text>
-          </View>
-        </View>
-
-        {/* Diagnosis preview */}
-        {job.diagnosis.primary_issue && (
-          <View className="mt-3 bg-slate-50 rounded-xl px-3 py-2.5">
-            <Text className="text-xs text-slate-600 leading-4" numberOfLines={2}>
-              {job.diagnosis.primary_issue}
+    <Pressable onPress={onPress} style={{ flex: 1, aspectRatio: 1 }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#E5E7EB",
+          borderRadius: 8,
+          overflow: "hidden",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <FontAwesome name="video-camera" size={20} color="#9CA3AF" />
+        <Text
+          style={{ color: "#6B7280", fontSize: 10, marginTop: 6 }}
+          numberOfLines={1}
+        >
+          {caption}
+        </Text>
+        {duration > 0 && (
+          <View
+            style={{
+              position: "absolute",
+              bottom: 4,
+              right: 4,
+              backgroundColor: "rgba(0,0,0,0.5)",
+              borderRadius: 3,
+              paddingHorizontal: 4,
+              paddingVertical: 1,
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 9, fontWeight: "500" }}>
+              {fmt}
             </Text>
           </View>
         )}
-
-        {/* Footer */}
-        <View className="flex-row items-center mt-3 justify-between">
-          <View className="flex-row items-center">
-            <FontAwesome name="clock-o" size={11} color="#94A3B8" />
-            <Text className="text-xs text-slate-400 ml-1">
-              {formatDate(job.created_at)} at {formatTime(job.created_at)}
-            </Text>
-            {job.duration_minutes > 0 && (
-              <Text className="text-xs text-slate-400 ml-2">
-                {job.duration_minutes}m
-              </Text>
-            )}
-          </View>
-          <View className="w-6 h-6 bg-slate-100 rounded-full items-center justify-center">
-            <FontAwesome name="chevron-right" size={10} color="#94A3B8" />
-          </View>
-        </View>
       </View>
     </Pressable>
   );
 }
 
-function StatCard({
-  value,
-  label,
-  icon,
-}: {
-  value: number;
-  label: string;
-  icon: React.ComponentProps<typeof FontAwesome>["name"];
-}) {
-  return (
-    <View
-      className="flex-1 bg-white rounded-2xl py-4 items-center mx-1.5"
-      style={{
-        shadowColor: "#0F172A",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 4,
-        elevation: 1,
-      }}
-    >
-      <View className="w-8 h-8 rounded-full bg-slate-100 items-center justify-center mb-2">
-        <FontAwesome name={icon} size={14} color="#475569" />
-      </View>
-      <Text className="text-2xl font-bold text-slate-900">{value}</Text>
-      <Text className="text-xs text-slate-400 mt-0.5">{label}</Text>
-    </View>
-  );
-}
+/* ── Screen ───────────────────────────────────────────────────── */
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { jobs, isLoaded } = useJobStore();
+  const jobs = useJobStore((s) => s.jobs);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const sortedJobs = [...jobs].sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
+  const handleSettings = () => {
+    router.push("/(tabs)/settings");
+  };
 
-  const todayJobs = sortedJobs.filter((j) => isToday(j.created_at));
-  const earlierJobs = sortedJobs.filter((j) => !isToday(j.created_at));
-
-  const thisWeekCount = sortedJobs.filter((j) => {
-    const d = new Date(j.created_at);
-    const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    return d >= weekAgo;
-  }).length;
-
-  const thisMonthCount = sortedJobs.filter((j) => {
-    const d = new Date(j.created_at);
-    const now = new Date();
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }).length;
-
-  if (!isLoaded) {
-    return (
-      <View className="flex-1 items-center justify-center bg-slate-50">
-        <ActivityIndicator size="large" color="#0F172A" />
-      </View>
+  const handleUpdate = () => {
+    Alert.alert(
+      "Firmware Update",
+      "Vuzix Blade firmware v2.4.1 is available. Update now?",
+      [
+        { text: "Later", style: "cancel" },
+        {
+          text: "Update",
+          onPress: () => {
+            setIsUpdating(true);
+            setTimeout(() => {
+              setIsUpdating(false);
+              Alert.alert("Updated", "Firmware updated to v2.4.1 successfully.");
+            }, 2500);
+          },
+        },
+      ]
     );
-  }
+  };
 
-  if (jobs.length === 0) {
-    return (
-      <View className="flex-1 items-center justify-center bg-slate-50 px-8">
-        <View className="w-20 h-20 rounded-full bg-slate-100 items-center justify-center mb-4">
-          <FontAwesome name="wrench" size={32} color="#CBD5E1" />
-        </View>
-        <Text className="text-xl font-bold text-slate-300">No Jobs Yet</Text>
-        <Text className="text-sm text-slate-400 mt-2 text-center leading-5">
-          Go to Settings and tap "Load Sample Data" to get started with demo
-          HVAC jobs.
-        </Text>
-      </View>
+  const handlePause = () => {
+    setIsPaused((prev) => {
+      const next = !prev;
+      if (next) {
+        Alert.alert("Paused", "Glasses recording and streaming paused.");
+      } else {
+        Alert.alert("Resumed", "Glasses recording and streaming resumed.");
+      }
+      return next;
+    });
+  };
+
+  const handleTranslate = () => {
+    const languages = ["Spanish", "French", "German", "Chinese", "Japanese", "Portuguese"];
+    Alert.alert(
+      "Live Translate",
+      "Select target language for real-time translation:",
+      [
+        ...languages.map((lang) => ({
+          text: lang,
+          onPress: () => Alert.alert("Translation Active", `Translating to ${lang}. Speak normally — translations will appear on your glasses display.`),
+        })),
+        { text: "Cancel", style: "cancel" },
+      ]
     );
-  }
+  };
+
+  const allClips = useMemo(() => {
+    const clips: { jobId: string; clip: any }[] = [];
+    for (const job of jobs) {
+      for (const clip of job.clips || []) {
+        clips.push({ jobId: job.id, clip });
+      }
+    }
+    clips.sort(
+      (a, b) =>
+        new Date(b.clip.recorded_at).getTime() -
+        new Date(a.clip.recorded_at).getTime()
+    );
+    return clips;
+  }, [jobs]);
+
+  const previewClips = allClips.slice(0, 8);
 
   return (
-    <View className="flex-1 bg-slate-50">
-      <FlatList
-        data={sortedJobs}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: 24 }}
-        ListHeaderComponent={
-          <View>
-            {/* Stats */}
-            <View className="flex-row px-2.5 py-4">
-              <StatCard value={thisWeekCount} label="This Week" icon="calendar" />
-              <StatCard value={thisMonthCount} label="This Month" icon="bar-chart" />
-              <StatCard value={jobs.length} label="All Jobs" icon="briefcase" />
-            </View>
-          </View>
-        }
-        renderItem={({ item, index }) => {
-          const isFirstToday = index === 0 && todayJobs.length > 0;
-          const isFirstEarlier =
-            index === todayJobs.length && earlierJobs.length > 0;
-
-          return (
-            <View>
-              {isFirstToday && (
-                <Text className="text-xs font-bold text-slate-400 uppercase tracking-widest mx-5 mb-2 mt-1">
-                  Today
-                </Text>
-              )}
-              {isFirstEarlier && (
-                <Text className="text-xs font-bold text-slate-400 uppercase tracking-widest mx-5 mb-2 mt-5">
-                  Earlier
-                </Text>
-              )}
-              <JobCard
-                job={item}
-                onPress={() => router.push(`/job/${item.id}`)}
+    <View style={{ flex: 1, backgroundColor: "#F2F4F7" }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* ── Device Card ────────────────────────────────────── */}
+        <View
+          style={{
+            marginHorizontal: 16,
+            marginTop: 16,
+            backgroundColor: "#fff",
+            borderRadius: 24,
+            padding: 24,
+            overflow: "hidden",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.06,
+            shadowRadius: 8,
+            elevation: 3,
+          }}
+        >
+          {/* Top row: brand + settings */}
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              marginBottom: 4,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text
+                style={{
+                  color: "#111827",
+                  fontSize: 15,
+                  fontWeight: "700",
+                  letterSpacing: 0.5,
+                }}
+              >
+                Vuzix
+              </Text>
+              <View
+                style={{
+                  width: 1,
+                  height: 14,
+                  backgroundColor: "#D1D5DB",
+                }}
               />
+              <Text
+                style={{
+                  color: "#9CA3AF",
+                  fontSize: 11,
+                  fontWeight: "500",
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                }}
+              >
+                Blade
+              </Text>
             </View>
-          );
-        }}
-      />
+            <Pressable
+              onPress={handleSettings}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: "#F3F4F6",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <FontAwesome name="cog" size={18} color="#9CA3AF" />
+            </Pressable>
+          </View>
+
+          {/* Device name */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text style={{ color: "#111827", fontSize: 22, fontWeight: "600" }}>
+              Tech's Glasses
+            </Text>
+            <FontAwesome name="pencil" size={11} color="#D1D5DB" />
+          </View>
+
+          {/* Battery */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              marginTop: 4,
+            }}
+          >
+            <FontAwesome name="battery-full" size={13} color="#22C55E" />
+            <Text style={{ color: "#6B7280", fontSize: 13, fontWeight: "500" }}>
+              100%
+            </Text>
+          </View>
+
+          {/* 3D Model */}
+          <View style={{ alignItems: "center", paddingVertical: 20 }}>
+            <Suspense
+              fallback={
+                <View style={{ width: 220, height: 220, alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color="#1E3A5F" />
+                </View>
+              }
+            >
+              <GlassesViewer size={220} />
+            </Suspense>
+          </View>
+        </View>
+
+        {/* ── Action Buttons ─────────────────────────────────── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingVertical: 16,
+            gap: 10,
+          }}
+        >
+          <Pressable
+            onPress={handleUpdate}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: "#1E3A5F",
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+            }}
+          >
+            {isUpdating ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name="download" size={16} color="#fff" />
+            )}
+            <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600" }}>
+              {isUpdating ? "Updating..." : "Update available"}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={handlePause}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isPaused ? "#FEF2F2" : "#fff",
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.05,
+              shadowRadius: 2,
+              elevation: 1,
+            }}
+          >
+            <FontAwesome name={isPaused ? "play" : "moon-o"} size={16} color={isPaused ? "#DC2626" : "#6B7280"} />
+            <Text style={{ color: isPaused ? "#DC2626" : "#6B7280", fontSize: 14, fontWeight: "600" }}>
+              {isPaused ? "Resume" : "Pause"}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={handleTranslate}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: "#fff",
+              paddingHorizontal: 20,
+              paddingVertical: 14,
+              borderRadius: 16,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.05,
+              shadowRadius: 2,
+              elevation: 1,
+            }}
+          >
+            <FontAwesome name="language" size={16} color="#6B7280" />
+            <Text style={{ color: "#6B7280", fontSize: 14, fontWeight: "600" }}>
+              Translate
+            </Text>
+          </Pressable>
+        </ScrollView>
+
+        {/* ── Divider ────────────────────────────────────────── */}
+        <View
+          style={{
+            height: 1,
+            backgroundColor: "#E5E7EB",
+            marginHorizontal: 20,
+            marginBottom: 24,
+          }}
+        />
+
+        {/* ── Clips Section ──────────────────────────────────── */}
+        <View style={{ paddingHorizontal: 20 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ color: "#111827", fontSize: 20, fontWeight: "600" }}>
+              Clips
+            </Text>
+            <Pressable onPress={() => router.push("/(tabs)/live")}>
+              <Text style={{ color: "#1E3A5F", fontSize: 14, fontWeight: "500" }}>
+                See all
+              </Text>
+            </Pressable>
+          </View>
+
+          {previewClips.length > 0 ? (
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: 2,
+                borderRadius: 16,
+                overflow: "hidden",
+              }}
+            >
+              {previewClips.map(({ jobId, clip }, i) => (
+                <View key={clip.id || i} style={{ width: "24.5%", aspectRatio: 1 }}>
+                  <ClipThumb
+                    caption={clip.caption}
+                    duration={clip.duration_seconds}
+                    onPress={() => router.push(`/job/${jobId}`)}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: 16,
+                padding: 32,
+                alignItems: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.05,
+                shadowRadius: 2,
+                elevation: 1,
+              }}
+            >
+              <FontAwesome name="video-camera" size={28} color="#D1D5DB" />
+              <Text
+                style={{
+                  color: "#6B7280",
+                  fontSize: 14,
+                  fontWeight: "500",
+                  marginTop: 12,
+                }}
+              >
+                No clips yet
+              </Text>
+              <Text
+                style={{
+                  color: "#9CA3AF",
+                  fontSize: 12,
+                  marginTop: 4,
+                  textAlign: "center",
+                }}
+              >
+                Clips recorded from your glasses will appear here.
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </View>
   );
 }
