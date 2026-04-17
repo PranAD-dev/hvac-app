@@ -15,7 +15,7 @@ import { useJobStore } from "../../store/jobStore";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_GAP = 12;
 const CARD_WIDTH = (SCREEN_WIDTH - 16 * 2 - CARD_GAP) / 2;
-const COMPOSIO_SERVER = "http://10.104.9.16:3001";
+const SERVER = "http://10.0.0.48:3001";
 const RENTAL_EMAIL = "suppboiiyeet@gmail.com";
 
 const TOOLS = [
@@ -142,7 +142,7 @@ export default function ToolsScreen() {
     });
 
     try {
-      const res = await fetch(`${COMPOSIO_SERVER}/gmail/send`, {
+      const res = await fetch(`${SERVER}/gmail/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

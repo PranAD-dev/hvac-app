@@ -11,8 +11,7 @@ import { useJobStore } from "../../store/jobStore";
 import { FontAwesome } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 
-const QB_SERVER = "http://10.104.9.16:9092";
-const COMPOSIO_SERVER = "http://10.104.9.16:3001";
+const SERVER = "http://10.0.0.48:3001";
 
 function SettingsRow({
   icon,
@@ -76,7 +75,7 @@ export default function SettingsScreen() {
   const checkQbStatus = async () => {
     setQbChecking(true);
     try {
-      const res = await fetch(`${QB_SERVER}/qb/status`);
+      const res = await fetch(`${SERVER}/qb/status`);
       const data = await res.json();
       setQbConnected(data.connected);
     } catch {
@@ -87,7 +86,7 @@ export default function SettingsScreen() {
 
   const handleConnectQB = async () => {
     try {
-      const res = await fetch(`${QB_SERVER}/qb/connect`);
+      const res = await fetch(`${SERVER}/qb/connect`);
       const data = await res.json();
       if (data.authUrl) {
         await WebBrowser.openBrowserAsync(data.authUrl);
@@ -109,7 +108,7 @@ export default function SettingsScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await fetch(`${QB_SERVER}/qb/disconnect`, { method: "POST" });
+            await fetch(`${SERVER}/qb/disconnect`, { method: "POST" });
             setQbConnected(false);
           } catch {}
         },
@@ -120,7 +119,7 @@ export default function SettingsScreen() {
   const checkJobberStatus = async () => {
     setJobberChecking(true);
     try {
-      const res = await fetch(`${COMPOSIO_SERVER}/jobber/status`);
+      const res = await fetch(`${SERVER}/jobber/status`);
       const data = await res.json();
       setJobberConnected(data.connected);
       setJobberChecking(false);
@@ -134,7 +133,7 @@ export default function SettingsScreen() {
 
   const syncJobberJobs = async () => {
     try {
-      const res = await fetch(`${COMPOSIO_SERVER}/jobber/jobs`);
+      const res = await fetch(`${SERVER}/jobber/jobs`);
       const data = await res.json();
       if (data.jobs && data.jobs.length > 0) {
         await useJobStore.getState().syncJobberJobs(data.jobs);
@@ -144,7 +143,7 @@ export default function SettingsScreen() {
 
   const handleConnectJobber = async () => {
     try {
-      const res = await fetch(`${COMPOSIO_SERVER}/jobber/connect`);
+      const res = await fetch(`${SERVER}/jobber/connect`);
       const data = await res.json();
       if (data.redirectUrl) {
         await WebBrowser.openBrowserAsync(data.redirectUrl);

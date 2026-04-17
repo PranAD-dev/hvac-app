@@ -9,12 +9,15 @@
  * Usage: node scripts/rag-server.js [port]
  */
 
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "..", "server", ".env") });
 const http = require("http");
 const os = require("os");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const PORT = parseInt(process.argv[2] || "9091", 10);
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyD9V_kjdfuN_FWO0Hvnw63IVfJOTgJ3x2s";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY missing (set it in server/.env or export it)");
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });

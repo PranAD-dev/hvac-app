@@ -12,7 +12,7 @@ import {
 import { FontAwesome } from "@expo/vector-icons";
 import { useJobStore } from "../../store/jobStore";
 
-const RAG_SERVER = "http://10.104.9.16:9091";
+const RAG_SERVER = "http://10.0.0.48:3001";
 
 interface Message {
   id: string;
@@ -36,7 +36,6 @@ export default function AskScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const jobs = useJobStore((s) => s.jobs);
 
-  // Sync jobs to RAG server on mount
   useEffect(() => {
     syncJobs();
   }, [jobs]);
@@ -51,9 +50,7 @@ export default function AskScreen() {
       });
       const data = await res.json();
       if (data.ok) setSynced(true);
-    } catch {
-      // Server not running — still allow general HVAC questions
-    }
+    } catch {}
     setSyncing(false);
   };
 
@@ -103,17 +100,30 @@ export default function AskScreen() {
 
   return (
     <KeyboardAvoidingView
-      className="flex-1 bg-slate-50"
+      style={{ flex: 1, backgroundColor: "#FFFFFF" }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={90}
     >
       {/* Sync status */}
-      <View className="px-4 pt-2 pb-1 flex-row items-center">
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 6,
+        }}
+      >
         <View
-          className="w-2 h-2 rounded-full mr-2"
-          style={{ backgroundColor: synced ? "#16A34A" : syncing ? "#CA8A04" : "#DC2626" }}
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            marginRight: 8,
+            backgroundColor: synced ? "#22C55E" : syncing ? "#EAB308" : "#EF4444",
+          }}
         />
-        <Text className="text-xs text-slate-400">
+        <Text style={{ fontSize: 12, color: "#9CA3AF" }}>
           {synced
             ? `${jobs.length} jobs synced`
             : syncing
@@ -121,51 +131,97 @@ export default function AskScreen() {
             : "Not connected"}
         </Text>
         {!synced && !syncing && (
-          <Pressable onPress={syncJobs} className="ml-2">
-            <Text className="text-xs text-blue-500 font-bold">Retry</Text>
+          <Pressable onPress={syncJobs} style={{ marginLeft: 8 }}>
+            <Text
+              style={{ fontSize: 12, fontWeight: "700", color: "#1E3A5F" }}
+            >
+              Retry
+            </Text>
           </Pressable>
         )}
       </View>
 
       <ScrollView
         ref={scrollRef}
-        className="flex-1 px-4"
+        style={{ flex: 1, paddingHorizontal: 16 }}
         contentContainerStyle={{ paddingBottom: 16, paddingTop: 8 }}
       >
         {messages.length === 0 ? (
-          <View className="items-center pt-12">
-            <View className="w-16 h-16 rounded-2xl bg-slate-900 items-center justify-center mb-4">
-              <FontAwesome name="comments" size={28} color="#fff" />
+          <View style={{ alignItems: "center", paddingTop: 48 }}>
+            <View
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 20,
+                backgroundColor: "#F0F4F8",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 16,
+              }}
+            >
+              <FontAwesome name="comments" size={28} color="#1E3A5F" />
             </View>
-            <Text className="text-lg font-bold text-slate-900 mb-1">
+            <Text
+              style={{
+                fontSize: 20,
+                fontWeight: "700",
+                color: "#111827",
+                marginBottom: 6,
+              }}
+            >
               Ask about your jobs
             </Text>
-            <Text className="text-sm text-slate-400 text-center px-8 leading-5">
+            <Text
+              style={{
+                fontSize: 14,
+                textAlign: "center",
+                paddingHorizontal: 32,
+                lineHeight: 20,
+                color: "#9CA3AF",
+              }}
+            >
               Ask questions about past service calls, diagnoses, parts used, or
               anything from your job history.
             </Text>
 
             {/* Suggestion chips */}
-            <View className="mt-6 w-full">
+            <View style={{ marginTop: 24, width: "100%" }}>
               {SUGGESTIONS.map((s, i) => (
                 <Pressable
                   key={i}
                   onPress={() => handleSend(s)}
-                  className="bg-white rounded-xl px-4 py-3.5 mb-2"
-                  style={{
-                    shadowColor: "#0F172A",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.04,
-                    shadowRadius: 4,
-                    elevation: 1,
-                  }}
+                  style={{ marginBottom: 10 }}
                 >
-                  <View className="flex-row items-center">
-                    <FontAwesome name="comment-o" size={13} color="#94A3B8" />
-                    <Text className="text-sm text-slate-700 ml-3 flex-1">
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: "#F0F4F8",
+                      borderRadius: 14,
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                    }}
+                  >
+                    <FontAwesome
+                      name="comment-o"
+                      size={13}
+                      color="#9CA3AF"
+                    />
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        marginLeft: 12,
+                        flex: 1,
+                        color: "#374151",
+                      }}
+                    >
                       {s}
                     </Text>
-                    <FontAwesome name="arrow-right" size={11} color="#CBD5E1" />
+                    <FontAwesome
+                      name="arrow-right"
+                      size={11}
+                      color="#D1D5DB"
+                    />
                   </View>
                 </Pressable>
               ))}
@@ -175,54 +231,74 @@ export default function AskScreen() {
           messages.map((msg) => (
             <View
               key={msg.id}
-              className={`mb-3 ${msg.role === "user" ? "items-end" : "items-start"}`}
+              style={{
+                marginBottom: 12,
+                alignItems: msg.role === "user" ? "flex-end" : "flex-start",
+              }}
             >
-              <View
-                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                  msg.role === "user"
-                    ? "bg-slate-900"
-                    : "bg-white"
-                }`}
-                style={
-                  msg.role === "assistant"
-                    ? {
-                        shadowColor: "#0F172A",
-                        shadowOffset: { width: 0, height: 1 },
-                        shadowOpacity: 0.05,
-                        shadowRadius: 6,
-                        elevation: 2,
-                      }
-                    : undefined
-                }
-              >
-                <Text
-                  className={`text-sm leading-5 ${
-                    msg.role === "user" ? "text-white" : "text-slate-700"
-                  }`}
+              {msg.role === "user" ? (
+                <View
+                  style={{
+                    maxWidth: "85%",
+                    borderRadius: 18,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    backgroundColor: "#1E3A5F",
+                  }}
                 >
-                  {msg.text}
-                </Text>
-              </View>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 20,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    {msg.text}
+                  </Text>
+                </View>
+              ) : (
+                <View
+                  style={{
+                    maxWidth: "85%",
+                    borderRadius: 18,
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    backgroundColor: "#F0F4F8",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 20,
+                      color: "#374151",
+                    }}
+                  >
+                    {msg.text}
+                  </Text>
+                </View>
+              )}
             </View>
           ))
         )}
 
         {loading && (
-          <View className="items-start mb-3">
+          <View style={{ alignItems: "flex-start", marginBottom: 12 }}>
             <View
-              className="bg-white rounded-2xl px-5 py-4"
               style={{
-                shadowColor: "#0F172A",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.05,
-                shadowRadius: 6,
-                elevation: 2,
+                flexDirection: "row",
+                alignItems: "center",
+                backgroundColor: "#F0F4F8",
+                borderRadius: 18,
+                paddingHorizontal: 20,
+                paddingVertical: 14,
               }}
             >
-              <View className="flex-row items-center">
-                <ActivityIndicator size="small" color="#64748B" />
-                <Text className="text-sm text-slate-400 ml-2.5">Thinking...</Text>
-              </View>
+              <ActivityIndicator size="small" color="#1E3A5F" />
+              <Text
+                style={{ fontSize: 14, marginLeft: 10, color: "#9CA3AF" }}
+              >
+                Thinking...
+              </Text>
             </View>
           </View>
         )}
@@ -230,38 +306,57 @@ export default function AskScreen() {
 
       {/* Input bar */}
       <View
-        className="px-4 pt-2 pb-4 bg-white border-t border-slate-100"
         style={{
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.04,
-          shadowRadius: 8,
-          elevation: 4,
+          paddingHorizontal: 16,
+          paddingTop: 8,
+          paddingBottom: 16,
+          borderTopWidth: 1,
+          borderTopColor: "#E5E7EB",
         }}
       >
-        <View className="flex-row items-end bg-slate-50 rounded-2xl px-4">
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "flex-end",
+            borderRadius: 16,
+            paddingHorizontal: 16,
+            backgroundColor: "#F3F4F6",
+          }}
+        >
           <TextInput
             value={input}
             onChangeText={setInput}
             placeholder="Ask about your jobs..."
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor="#9CA3AF"
             multiline
-            className="flex-1 text-sm text-slate-900 py-3 max-h-24"
+            style={{
+              flex: 1,
+              fontSize: 14,
+              color: "#111827",
+              paddingVertical: 12,
+              maxHeight: 96,
+            }}
             onSubmitEditing={() => handleSend()}
             returnKeyType="send"
           />
           <Pressable
             onPress={() => handleSend()}
             disabled={!input.trim() || loading}
-            className="ml-2 mb-2.5 w-8 h-8 rounded-full items-center justify-center"
             style={{
-              backgroundColor: input.trim() ? "#0F172A" : "#E2E8F0",
+              marginLeft: 8,
+              marginBottom: 10,
+              width: 32,
+              height: 32,
+              borderRadius: 16,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: input.trim() ? "#1E3A5F" : "#D1D5DB",
             }}
           >
             <FontAwesome
               name="arrow-up"
               size={14}
-              color={input.trim() ? "#fff" : "#94A3B8"}
+              color={input.trim() ? "#FFFFFF" : "#9CA3AF"}
             />
           </Pressable>
         </View>

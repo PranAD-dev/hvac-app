@@ -1,0 +1,56 @@
+[
+  {
+    "id": "job-001-01",
+    "file_path": "clips/job-001-01.mp4",
+    "duration_seconds": 9,
+    "thumbnail_path": "clips/thumbs/job-001-01.jpg",
+    "caption": "Inspecting Asurity condensate safety overflow switch to prevent water damage.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  },
+  {
+    "id": "job-001-02",
+    "file_path": "clips/job-001-02.mp4",
+    "duration_seconds": 17,
+    "thumbnail_path": "clips/thumbs/job-001-02.jpg",
+    "caption": "Connecting and starting the refrigerant recovery process on the old unit.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  },
+  {
+    "id": "job-001-03",
+    "file_path": "clips/job-001-03.mp4",
+    "duration_seconds": 14,
+    "thumbnail_path": "clips/thumbs/job-001-03.jpg",
+    "caption": "Removing the old outdoor electrical disconnect box from the stucco wall.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  },
+  {
+    "id": "job-001-04",
+    "file_path": "clips/job-001-04.mp4",
+    "duration_seconds": 15,
+    "thumbnail_path": "clips/thumbs/job-001-04.jpg",
+    "caption": "Removing the old outdoor condenser unit from the patio area.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  },
+  {
+    "id": "job-001-05",
+    "file_path": "clips/job-001-05.mp4",
+    "duration_seconds": 9,
+    "thumbnail_path": "clips/thumbs/job-001-05.jpg",
+    "caption": "Flushing refrigerant lines with RX11 and nitrogen to clean the system.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  },
+  {
+    "id": "job-001-06",
+    "file_path": "clips/job-001-06.mp4",
+    "duration_seconds": 21,
+    "thumbnail_path": "clips/thumbs/job-001-06.jpg",
+    "caption": "Digital gauges showing the system pulling a deep vacuum for proper operation.",
+    "recorded_at": "2026-04-15T07:35:46.665Z",
+    "recorded_by": "Mike Torres"
+  }
+]

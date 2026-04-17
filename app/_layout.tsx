@@ -45,18 +45,24 @@ export default function RootLayout() {
     <Stack
       screenOptions={{
         headerStyle: {
-          backgroundColor: "#0F172A",
+          backgroundColor: "#1E3A5F",
         },
         headerTintColor: "#fff",
         headerTitleStyle: { fontWeight: "700", fontSize: 17 },
         headerShadowVisible: false,
       }}
     >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false, title: "Tab" }} />
       <Stack.Screen
         name="job/[id]"
         options={{
-          title: "Job Details",
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="job/automate/[id]"
+        options={{
+          title: "Automate",
           headerBackTitle: "Back",
         }}
       />
@@ -71,6 +77,27 @@ export default function RootLayout() {
         name="story/[jobId]"
         options={{
           title: "Job Story",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="note/[jobId]/[noteId]"
+        options={{
+          title: "Note",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="notes/[jobId]"
+        options={{
+          title: "Notes",
+          headerBackTitle: "Back",
+        }}
+      />
+      <Stack.Screen
+        name="clips/[jobId]"
+        options={{
+          title: "Clips",
           headerBackTitle: "Back",
         }}
       />

@@ -9,11 +9,14 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  StatusBar,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { FontAwesome } from "@expo/vector-icons";
+import { Video, ResizeMode } from "expo-av";
 import { useJobStore } from "../../store/jobStore";
 import { Note, Clip } from "../../types";
+import { CLIP_VIDEOS } from "../../data/clipAssets";
 
 type Filter = "all" | "notes" | "clips";
 
@@ -419,6 +422,10 @@ export default function NotesClipsScreen() {
   const [showTextNoteModal, setShowTextNoteModal] = useState(false);
   const [textNoteContent, setTextNoteContent] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string>("");
+  const [playingClip, setPlayingClip] = useState<{
+    clip: Clip;
+    jobId: string;
+  } | null>(null);
 
   const handleCreateTextNote = async () => {
     const targetJobId = selectedJobId || (jobs.length > 0 ? jobs[0].id : "");
@@ -713,7 +720,9 @@ export default function NotesClipsScreen() {
                   key={`clip-${clip.id}-${index}`}
                   clip={clip}
                   customerName={feedItem.customerName}
-                  onPress={() => router.push(`/job/${feedItem.jobId}`)}
+                  onPress={() =>
+                    setPlayingClip({ clip, jobId: feedItem.jobId })
+                  }
                   onDelete={() => deleteClip(feedItem.jobId, clip.id)}
                 />
               );
@@ -822,6 +831,99 @@ export default function NotesClipsScreen() {
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Clip Player Modal */}
+      <Modal
+        visible={playingClip !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPlayingClip(null)}
+        statusBarTranslucent
+      >
+        <StatusBar barStyle="light-content" />
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.95)",
+            justifyContent: "center",
+          }}
+        >
+          <Pressable
+            onPress={() => setPlayingClip(null)}
+            style={{
+              position: "absolute",
+              top: 56,
+              right: 20,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2,
+            }}
+            hitSlop={16}
+          >
+            <FontAwesome name="times" size={18} color="#FFF" />
+          </Pressable>
+          {playingClip && (
+            <>
+              <Video
+                source={
+                  CLIP_VIDEOS[playingClip.clip.id]
+                    ? CLIP_VIDEOS[playingClip.clip.id]
+                    : { uri: playingClip.clip.file_path }
+                }
+                style={{ width: "100%", aspectRatio: 16 / 9 }}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay
+                isLooping={false}
+              />
+              <View style={{ paddingHorizontal: 24, paddingTop: 20 }}>
+                <Text
+                  style={{
+                    color: "#FFF",
+                    fontSize: 15,
+                    fontWeight: "600",
+                    textAlign: "center",
+                  }}
+                >
+                  {playingClip.clip.caption || "Untitled clip"}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    const jobId = playingClip.jobId;
+                    setPlayingClip(null);
+                    router.push(`/job/${jobId}`);
+                  }}
+                  style={{
+                    marginTop: 20,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: "#FFFFFF",
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    gap: 8,
+                  }}
+                >
+                  <FontAwesome name="arrow-right" size={13} color="#0F172A" />
+                  <Text
+                    style={{
+                      color: "#0F172A",
+                      fontSize: 14,
+                      fontWeight: "700",
+                    }}
+                  >
+                    Go to Job Detail
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
       </Modal>
     </View>
   );

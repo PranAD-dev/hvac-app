@@ -1,32 +1,40 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
   ScrollView,
   Pressable,
-  Share,
-  Alert,
+  StyleSheet,
+  Animated,
+  Modal,
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  Modal,
-  ActivityIndicator,
+  Alert,
+  Dimensions,
   PanResponder,
   GestureResponderEvent,
+  ActivityIndicator,
+  Share,
+  Image,
+  StatusBar,
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import { Video, ResizeMode } from "expo-av";
+import { CLIP_VIDEOS, CLIP_THUMBS } from "../../data/clipAssets";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useJobStore } from "../../store/jobStore";
 import { FontAwesome } from "@expo/vector-icons";
-import { Note, Clip, Job } from "../../types";
+import { BlurView } from "expo-blur";
+import Svg, { Path } from "react-native-svg";
 import * as WebBrowser from "expo-web-browser";
 import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system/legacy";
+import { useJobStore } from "../../store/jobStore";
+import { Note, Clip, Job } from "../../types";
 
-const COMPOSIO_SERVER = "http://10.104.9.16:3001";
-const QB_SERVER = "http://10.104.9.16:9092";
+const SERVER = "http://10.0.0.48:3001";
 
-// --- PDF Generator ---
+// ─── PDF HTML generator ───────────────────────────────────────────
 
 function generateReportHTML(job: Job): string {
   const { unit, readings, findings, diagnosis, actions } = job;
@@ -44,145 +52,36 @@ function generateReportHTML(job: Job): string {
     <tr><td>Superheat</td><td>${readings.superheat_f}°F</td></tr>
     <tr><td>Subcooling</td><td>${readings.subcooling_f}°F</td></tr>
     <tr><td>Delta T</td><td>${readings.delta_t_f}°F</td></tr>
-    <tr><td>Supply Air</td><td>${readings.supply_air_temp_f}°F</td></tr>
-    <tr><td>Return Air</td><td>${readings.return_air_temp_f}°F</td></tr>
-    <tr><td>Outdoor Temp</td><td>${readings.outdoor_temp_f}°F</td></tr>
     <tr><td>Voltage</td><td>${readings.voltage}V</td></tr>
     <tr><td>Amperage</td><td>${readings.amperage}A</td></tr>
-    ${readings.static_pressure_in_wc > 0 ? `<tr><td>Static Pressure</td><td>${readings.static_pressure_in_wc} in.wc</td></tr>` : ""}
   `
     : "";
 
-  const findingsHTML = findings.length
-    ? findings
-        .map(
-          (f) =>
-            `<div style="margin-bottom:8px;padding:8px 12px;background:${f.severity === "critical" ? "#FEF2F2" : f.severity === "warning" ? "#FFF7ED" : "#EFF6FF"};border-radius:6px;border-left:3px solid ${f.severity === "critical" ? "#DC2626" : f.severity === "warning" ? "#EA580C" : "#2563EB"}">
-              <strong style="text-transform:capitalize">${f.component.replace(/_/g, " ")}</strong> <span style="color:#64748B;font-size:11px">(${f.severity})</span>
-              <div style="color:#475569;font-size:13px;margin-top:4px">${f.description}</div>
-            </div>`
-        )
-        .join("")
-    : "<p style='color:#94A3B8'>No findings</p>";
-
-  const actionsHTML = actions.length
-    ? actions
-        .map(
-          (a) =>
-            `<div style="margin-bottom:6px;padding:8px 12px;background:#F0FDF4;border-radius:6px;border-left:3px solid #16A34A">
-              <span style="color:#15803D;font-size:13px">${a.description}</span>
-              ${a.quantity > 0 ? `<span style="color:#94A3B8;font-size:11px;margin-left:8px">Qty: ${a.quantity} ${a.unit}${a.part_number ? ` #${a.part_number}` : ""}</span>` : ""}
-            </div>`
-        )
-        .join("")
-    : "<p style='color:#94A3B8'>No actions taken</p>";
-
-  const partsHTML = diagnosis.parts_needed.length
-    ? diagnosis.parts_needed
-        .map(
-          (p) =>
-            `<tr><td>${p.name}</td><td style="font-family:monospace">${p.spec}</td><td style="color:#64748B">${p.reason}</td></tr>`
-        )
-        .join("")
-    : "";
-
-  const notesHTML = (job.notes || []).length
-    ? (job.notes || [])
-        .map(
-          (n) =>
-            `<div style="margin-bottom:6px;padding:8px 12px;background:${n.source === "vision" ? "#F5F3FF" : "#EFF6FF"};border-radius:6px;border-left:3px solid ${n.source === "vision" ? "#7C3AED" : "#2563EB"}">
-              <span style="font-size:10px;font-weight:700;color:${n.source === "vision" ? "#7C3AED" : "#2563EB"};text-transform:uppercase">${n.source}</span>
-              <div style="color:#475569;font-size:13px;margin-top:3px">${n.text}</div>
-            </div>`
-        )
-        .join("")
-    : "";
-
-  return `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><style>
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 24px; color: #0F172A; font-size: 14px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  h2 { font-size: 14px; color: #64748B; text-transform: uppercase; letter-spacing: 1.5px; margin: 28px 0 12px; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px; }
-  .header { background: #0F172A; color: white; padding: 24px; border-radius: 12px; margin-bottom: 20px; }
-  .header h1 { color: white; font-size: 22px; }
-  .header p { color: #94A3B8; margin: 4px 0 0; font-size: 13px; }
-  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-  .meta { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
-  .meta-item { color: #CBD5E1; font-size: 12px; }
-  table { width: 100%; border-collapse: collapse; }
-  table td { padding: 8px 12px; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
-  table td:first-child { color: #64748B; width: 40%; }
-  table td:last-child { font-weight: 600; }
-  .unit-card { background: #F8FAFC; padding: 16px; border-radius: 10px; }
-  .unit-name { font-size: 18px; font-weight: 800; }
-  .unit-model { font-family: monospace; color: #64748B; font-size: 13px; margin-top: 2px; }
-  .tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .tag { background: #E2E8F0; padding: 2px 8px; border-radius: 4px; font-size: 11px; color: #475569; }
-  .diagnosis-box { background: #F8FAFC; padding: 16px; border-radius: 10px; }
-  .diagnosis-title { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
-  .diagnosis-summary { color: #475569; line-height: 1.6; font-size: 13px; }
-  .footer { margin-top: 32px; padding-top: 16px; border-top: 2px solid #E2E8F0; color: #94A3B8; font-size: 11px; text-align: center; }
-</style></head>
-<body>
-
-<div class="header">
-  <h1>Service Report</h1>
-  <p>${job.customer_name} — ${job.customer_address}</p>
-  <div class="meta">
-    <span class="meta-item">${date}</span>
-    <span class="meta-item">Tech: ${job.technician_name}</span>
-    ${job.duration_minutes > 0 ? `<span class="meta-item">${job.duration_minutes} min</span>` : ""}
-    <span class="badge" style="background:${diagnosis.urgency === "emergency" ? "#DC2626" : diagnosis.urgency === "urgent" ? "#EA580C" : "#16A34A"};color:white">${diagnosis.urgency}</span>
-  </div>
-</div>
-
-<h2>Unit Information</h2>
-<div class="unit-card">
-  <div class="unit-name">${unit.brand}</div>
-  <div class="unit-model">${unit.model_number}</div>
-  <div class="tags">
-    <span class="tag">${unit.refrigerant_type}</span>
-    <span class="tag">${unit.tonnage}T</span>
-    <span class="tag">${unit.system_type}</span>
-    <span class="tag">${unit.age_years} yr old</span>
-    <span class="tag">S/N: ${unit.serial_number}</span>
-  </div>
-</div>
-
-${readings.taken_at ? `<h2>Readings</h2><table>${readingRows}</table>` : ""}
-
-<h2>AI Findings</h2>
-${findingsHTML}
-
-<h2>AI Diagnosis</h2>
-<div class="diagnosis-box">
-  <div class="diagnosis-title">${diagnosis.primary_issue}</div>
-  <div style="margin-bottom:8px"><span class="badge" style="background:${diagnosis.confidence === "high" ? "#DCFCE7" : diagnosis.confidence === "medium" ? "#FEF9C3" : "#FEF2F2"};color:${diagnosis.confidence === "high" ? "#16A34A" : diagnosis.confidence === "medium" ? "#CA8A04" : "#EA580C"}">${diagnosis.confidence} confidence</span></div>
-  <div class="diagnosis-summary">${diagnosis.technical_summary}</div>
-  ${diagnosis.recommended_actions.length ? `<div style="margin-top:12px"><strong style="font-size:12px;color:#64748B;text-transform:uppercase">Recommended Actions</strong>${diagnosis.recommended_actions.map((a, i) => `<div style="margin-top:6px;font-size:13px;color:#334155">${i + 1}. ${a}</div>`).join("")}</div>` : ""}
-</div>
-
-${partsHTML ? `<h2>Parts Needed</h2><table><tr style="background:#FFFBEB"><td><strong>Part</strong></td><td><strong>Spec</strong></td><td><strong>Reason</strong></td></tr>${partsHTML}</table>` : ""}
-
-<h2>Actions Taken</h2>
-${actionsHTML}
-
-${notesHTML ? `<h2>Technician Notes</h2>${notesHTML}` : ""}
-
-<h2>Service Report</h2>
-<p style="color:#475569;line-height:1.7;font-size:13px">${job.service_report || "Report pending."}</p>
-
-<div class="footer">
-  Generated by HVAC Companion — ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-</div>
-
-</body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: -apple-system, Helvetica, Arial, sans-serif; margin: 0; padding: 24px; color: #0F172A; font-size: 14px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    h2 { font-size: 14px; color: #64748B; text-transform: uppercase; letter-spacing: 1.5px; margin: 28px 0 12px; border-bottom: 2px solid #E2E8F0; padding-bottom: 6px; }
+    .header { background: #0F172A; color: white; padding: 24px; border-radius: 12px; margin-bottom: 20px; }
+    .header h1 { color: white; font-size: 22px; }
+    .header p { color: #94A3B8; margin: 4px 0 0; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; }
+    table td { padding: 8px 12px; border-bottom: 1px solid #F1F5F9; font-size: 13px; }
+    table td:first-child { color: #64748B; width: 40%; }
+    table td:last-child { font-weight: 600; }
+  </style></head><body>
+    <div class="header"><h1>Service Report</h1><p>${job.customer_name} — ${job.customer_address}</p><p>${date} · Tech: ${job.technician_name}</p></div>
+    <h2>Unit</h2><p>${unit.brand} ${unit.system_type} · ${unit.tonnage}T · ${unit.refrigerant_type}</p>
+    ${readings.taken_at ? `<h2>Readings</h2><table>${readingRows}</table>` : ""}
+    <h2>Diagnosis</h2><p><strong>${diagnosis.primary_issue}</strong></p><p>${diagnosis.technical_summary}</p>
+    <h2>Service Report</h2><p>${job.service_report || "Report pending."}</p>
+  </body></html>`;
 }
 
-// --- Helpers ---
+// ─── Helpers ────────────────────────────────────────────────────────
 
-function getSeverityColor(severity: string) {
+type ReadingStatus = "normal" | "warning" | "critical";
+
+function getSeverityColor(severity: string): string {
   switch (severity) {
     case "critical":
       return "#DC2626";
@@ -193,18 +92,7 @@ function getSeverityColor(severity: string) {
   }
 }
 
-function getSeverityIcon(severity: string): React.ComponentProps<typeof FontAwesome>["name"] {
-  switch (severity) {
-    case "critical":
-      return "exclamation-triangle";
-    case "warning":
-      return "exclamation-circle";
-    default:
-      return "info-circle";
-  }
-}
-
-function getUrgencyColor(urgency: string) {
+function getUrgencyColor(urgency: string): string {
   switch (urgency) {
     case "emergency":
       return "#DC2626";
@@ -215,13 +103,7 @@ function getUrgencyColor(urgency: string) {
   }
 }
 
-type ReadingStatus = "normal" | "warning" | "critical";
-
-function getReadingStatus(
-  value: number,
-  min: number,
-  max: number
-): ReadingStatus {
+function getReadingStatus(value: number, min: number, max: number): ReadingStatus {
   if (value >= min && value <= max) return "normal";
   const diff = value < min ? min - value : value - max;
   const range = max - min;
@@ -229,7 +111,7 @@ function getReadingStatus(
   return "warning";
 }
 
-function getStatusColor(status: ReadingStatus) {
+function getStatusColor(status: ReadingStatus): string {
   switch (status) {
     case "normal":
       return "#16A34A";
@@ -240,7 +122,7 @@ function getStatusColor(status: ReadingStatus) {
   }
 }
 
-function formatDateTime(iso: string) {
+function formatDateTime(iso: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return d.toLocaleDateString("en-US", {
@@ -250,6 +132,18 @@ function formatDateTime(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
 function getActionIcon(type: string): React.ComponentProps<typeof FontAwesome>["name"] {
@@ -273,97 +167,51 @@ function getActionIcon(type: string): React.ComponentProps<typeof FontAwesome>["
   }
 }
 
-// --- Section Components ---
+// ─── Tabs ───────────────────────────────────────────────────────────
 
-function SectionHeader({ title, icon }: { title: string; icon?: React.ComponentProps<typeof FontAwesome>["name"] }) {
-  return (
-    <View className="flex-row items-center px-5 mt-7 mb-3">
-      {icon && (
-        <View className="w-5 h-5 rounded items-center justify-center mr-2">
-          <FontAwesome name={icon} size={11} color="#94A3B8" />
-        </View>
-      )}
-      <Text className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-        {title}
-      </Text>
-    </View>
-  );
-}
+type TabId = "overview" | "readings" | "timeline" | "report";
 
-function Card({ children, noPadding }: { children: React.ReactNode; noPadding?: boolean }) {
-  return (
-    <View
-      className={`bg-white mx-4 rounded-2xl ${noPadding ? "" : "p-5"}`}
-      style={{
-        shadowColor: "#0F172A",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-      }}
-    >
-      {children}
-    </View>
-  );
-}
+const TABS: { id: TabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "readings", label: "Gauges" },
+  { id: "timeline", label: "Work" },
+  { id: "report", label: "Report" },
+];
 
-function ReadingCell({
-  label,
-  value,
-  unit,
-  status,
-  target,
-}: {
-  label: string;
-  value: number;
-  unit: string;
-  status: ReadingStatus;
-  target?: string;
-}) {
-  const color = getStatusColor(status);
-  return (
-    <View className="items-center flex-1 py-3">
-      <Text className="text-xs font-semibold text-slate-400 mb-1.5 tracking-wide">
-        {label}
-      </Text>
-      <View className="flex-row items-baseline">
-        <Text className="text-xl font-bold" style={{ color: status === "normal" ? "#0F172A" : color }}>
-          {value}
-        </Text>
-        <Text className="text-xs font-medium text-slate-400 ml-0.5">{unit}</Text>
-      </View>
-      {target && (
-        <Text className="text-xs text-slate-300 mt-1">{target}</Text>
-      )}
-      <View
-        className="w-1.5 h-1.5 rounded-full mt-2"
-        style={{ backgroundColor: color }}
-      />
-    </View>
-  );
-}
-
-// --- Main Screen ---
+// ─── Screen ─────────────────────────────────────────────────────────
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const jobs = useJobStore((s) => s.jobs);
   const { addNote, deleteNote, deleteClip, saveSignature } = useJobStore();
   const techName = useJobStore((s) => s.techName);
-  const [showNoteModal, setShowNoteModal] = useState(false);
-  const [noteText, setNoteText] = useState("");
+
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailTo, setEmailTo] = useState("");
-  const [emailSending, setEmailSending] = useState(false);
   const [emailMode, setEmailMode] = useState<"simple" | "pdf">("simple");
-  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [noteText, setNoteText] = useState("");
   const [showSignModal, setShowSignModal] = useState(false);
   const [signPaths, setSignPaths] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState("");
   const [signerName, setSignerName] = useState("");
   const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const [invoiceCreated, setInvoiceCreated] = useState<{ docNumber: string; totalAmount: number } | null>(null);
+  const [invoiceCreated, setInvoiceCreated] = useState<{
+    docNumber: string;
+    totalAmount: number;
+  } | null>(null);
+  const [focused, setFocused] = useState<
+    | { kind: "diagnosis" }
+    | { kind: "finding"; id: string }
+    | null
+  >(null);
+  const [playingClip, setPlayingClip] = useState<Clip | null>(null);
+
+  const tabIndicator = useRef(new Animated.Value(0)).current;
 
   const signPanResponder = useRef(
     PanResponder.create({
@@ -386,26 +234,135 @@ export default function JobDetailScreen() {
 
   const job = jobs.find((j) => j.id === id);
 
-  if (!job) {
-    return (
-      <View className="flex-1 items-center justify-center bg-slate-50">
-        <Text className="text-slate-400">Job not found</Text>
-      </View>
-    );
-  }
+  const urgencyColor = useMemo(
+    () => (job ? getUrgencyColor(job.diagnosis.urgency) : "#16A34A"),
+    [job]
+  );
 
-  const { unit, readings, findings, diagnosis, actions, photos } = job;
-  const notes = job.notes || [];
-  const clips = job.clips || [];
+  const switchTab = useCallback(
+    (tab: TabId) => {
+      const idx = TABS.findIndex((t) => t.id === tab);
+      Animated.spring(tabIndicator, {
+        toValue: idx,
+        useNativeDriver: true,
+        speed: 20,
+        bounciness: 6,
+      }).start();
+      setActiveTab(tab);
+    },
+    [tabIndicator]
+  );
+
+  const callCustomer = useCallback(() => {
+    if (!job) return;
+    Alert.alert(
+      "Call Customer",
+      `Call ${job.customer_name} at ${job.customer_phone}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Call" },
+      ]
+    );
+  }, [job]);
+
+  const handleConnectGmail = async () => {
+    try {
+      const res = await fetch(`${SERVER}/gmail/connect`, { method: "POST" });
+      const data = await res.json();
+      if (data.redirectUrl) {
+        await WebBrowser.openBrowserAsync(data.redirectUrl);
+      } else {
+        Alert.alert("Error", data.error || "Failed to start Gmail auth");
+      }
+    } catch {
+      Alert.alert("Server Not Running", "Start the Composio server first.");
+    }
+  };
+
+  const handleEmailReport = async () => {
+    if (!job) return;
+    if (!emailTo.trim()) {
+      Alert.alert("Missing Email", "Enter a recipient email address.");
+      return;
+    }
+    setEmailSending(true);
+    try {
+      const statusRes = await fetch(`${SERVER}/gmail/status`);
+      const status = await statusRes.json();
+      if (!status.connected) {
+        setEmailSending(false);
+        Alert.alert("Gmail Not Connected", "Connect your Gmail account first.", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Connect Gmail", onPress: handleConnectGmail },
+        ]);
+        return;
+      }
+
+      const subject =
+        emailMode === "pdf"
+          ? `HVAC Detailed Service Report — ${job.customer_name} — ${formatDateTime(job.created_at)}`
+          : `HVAC Service Report — ${job.customer_name} — ${formatDateTime(job.created_at)}`;
+
+      let res: Response;
+      if (emailMode === "pdf") {
+        const { uri } = await Print.printToFileAsync({
+          html: generateReportHTML(job),
+          base64: false,
+        });
+        const pdfBase64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const filename = `hvac-report-${job.customer_name.replace(/\s+/g, "-").toLowerCase()}.pdf`;
+        const textBody = `Detailed HVAC service report for ${job.customer_name} — ${job.customer_address}\nDate: ${formatDateTime(job.created_at)}\nTechnician: ${job.technician_name}\n\nSee the attached PDF for the full diagnostic report.`;
+        res = await fetch(`${SERVER}/gmail/send-pdf`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipient_email: emailTo.trim(),
+            subject,
+            body: textBody,
+            pdf_base64: pdfBase64,
+            filename,
+          }),
+        });
+      } else {
+        const body = `Service Report\n${job.customer_name} — ${job.customer_address}\n${formatDateTime(job.created_at)}\nTechnician: ${job.technician_name}\n\n${job.service_report}`;
+        res = await fetch(`${SERVER}/gmail/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recipient_email: emailTo.trim(),
+            subject,
+            body,
+            is_html: false,
+          }),
+        });
+      }
+      const result = await res.json();
+      setEmailSending(false);
+
+      if (result.success) {
+        setShowEmailModal(false);
+        setEmailTo("");
+        Alert.alert("Sent!", `Report emailed to ${emailTo.trim()}`);
+      } else {
+        Alert.alert("Failed", result.error || "Could not send email.");
+      }
+    } catch {
+      setEmailSending(false);
+      Alert.alert("Server Not Running", "Start the Composio server first.");
+    }
+  };
 
   const handleAddNote = async () => {
-    if (!noteText.trim()) return;
+    if (!job || !noteText.trim()) return;
     await addNote(job.id, noteText, "manual", techName);
     setNoteText("");
     setShowNoteModal(false);
   };
 
   const handleDeleteNote = (note: Note) => {
+    if (!job) return;
     Alert.alert("Delete Note", "Remove this note?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -417,6 +374,7 @@ export default function JobDetailScreen() {
   };
 
   const handleDeleteClip = (clip: Clip) => {
+    if (!job) return;
     Alert.alert("Delete Clip", "Remove this clip?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -427,113 +385,11 @@ export default function JobDetailScreen() {
     ]);
   };
 
-  const handleConnectGmail = async () => {
-    try {
-      const res = await fetch(`${COMPOSIO_SERVER}/gmail/connect`, {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (data.redirectUrl) {
-        await WebBrowser.openBrowserAsync(data.redirectUrl);
-      } else {
-        Alert.alert("Error", data.error || "Failed to start Gmail auth");
-      }
-    } catch {
-      Alert.alert(
-        "Server Not Running",
-        "Start the Composio server first:\ncd server && node index.js"
-      );
-    }
-  };
-
-  const handleEmailReport = async () => {
-    if (!emailTo.trim()) {
-      Alert.alert("Missing Email", "Enter a recipient email address.");
-      return;
-    }
-    setEmailSending(true);
-    try {
-      const statusRes = await fetch(`${COMPOSIO_SERVER}/gmail/status`);
-      const status = await statusRes.json();
-      if (!status.connected) {
-        setEmailSending(false);
-        Alert.alert(
-          "Gmail Not Connected",
-          "Connect your Gmail account first.",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Connect Gmail", onPress: handleConnectGmail },
-          ]
-        );
-        return;
-      }
-
-      let emailSubject: string;
-      let emailBody: string;
-
-      if (emailMode === "pdf") {
-        // Generate detailed HTML report and send as HTML email
-        emailSubject = `HVAC Detailed Service Report — ${job.customer_name} — ${formatDateTime(job.created_at)}`;
-        emailBody = generateReportHTML(job);
-
-        const res = await fetch(`${COMPOSIO_SERVER}/gmail/send`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipient_email: emailTo.trim(),
-            subject: emailSubject,
-            body: emailBody,
-            is_html: true,
-          }),
-        });
-        const result = await res.json();
-        setEmailSending(false);
-
-        if (result.success) {
-          setShowEmailModal(false);
-          setEmailTo("");
-          Alert.alert("Sent!", `Detailed report emailed to ${emailTo.trim()}`);
-        } else {
-          Alert.alert("Failed", result.error || "Could not send report.");
-        }
-      } else {
-        // Simple text email
-        emailSubject = `HVAC Service Report — ${job.customer_name} — ${formatDateTime(job.created_at)}`;
-        emailBody = `Service Report\n${job.customer_name} — ${job.customer_address}\n${formatDateTime(job.created_at)}\nTechnician: ${job.technician_name}\n\n${job.service_report}`;
-
-        const res = await fetch(`${COMPOSIO_SERVER}/gmail/send`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipient_email: emailTo.trim(),
-            subject: emailSubject,
-            body: emailBody,
-          }),
-        });
-        const result = await res.json();
-        setEmailSending(false);
-
-        if (result.success) {
-          setShowEmailModal(false);
-          setEmailTo("");
-          Alert.alert("Sent!", `Report emailed to ${emailTo.trim()}`);
-        } else {
-          Alert.alert("Failed", result.error || "Could not send email.");
-        }
-      }
-    } catch {
-      setEmailSending(false);
-      Alert.alert(
-        "Server Not Running",
-        "Start the Composio server first:\ncd server && node index.js"
-      );
-    }
-  };
-
   const handleCreateInvoice = async () => {
+    if (!job) return;
     setInvoiceLoading(true);
     try {
-      const statusRes = await fetch(`${QB_SERVER}/qb/status`);
+      const statusRes = await fetch(`${SERVER}/qb/status`);
       const status = await statusRes.json();
       if (!status.connected) {
         setInvoiceLoading(false);
@@ -543,602 +399,506 @@ export default function JobDetailScreen() {
         );
         return;
       }
-
-      const res = await fetch(`${QB_SERVER}/qb/invoice`, {
+      const res = await fetch(`${SERVER}/qb/invoice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ job }),
       });
       const result = await res.json();
       setInvoiceLoading(false);
-
       if (result.success) {
         setInvoiceCreated({
           docNumber: result.invoice.docNumber,
           totalAmount: result.invoice.totalAmount,
         });
-        Alert.alert(
-          "Invoice Created",
-          `Invoice #${result.invoice.docNumber} for $${result.invoice.totalAmount} sent to QuickBooks.`
-        );
       } else {
         Alert.alert("Failed", result.error || "Could not create invoice.");
       }
     } catch {
       setInvoiceLoading(false);
-      Alert.alert(
-        "Server Not Running",
-        "Start the QuickBooks server:\nnode scripts/quickbooks-server.js"
-      );
+      Alert.alert("Server Not Running", "Start the QuickBooks server.");
     }
   };
 
-  function formatDuration(seconds: number) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
+  const openSignModal = () => {
+    if (!job) return;
+    setSignPaths([]);
+    setCurrentPath("");
+    setSignerName(job.customer_name);
+    setShowSignModal(true);
+  };
 
-  const handleShareReport = async () => {
-    if (!job.service_report) {
-      Alert.alert("No Report", "This job doesn't have a service report yet.");
+  const saveSig = async () => {
+    if (!job) return;
+    if (signPaths.length === 0) {
+      Alert.alert("No Signature", "Please sign before saving.");
       return;
     }
-    try {
-      await Share.share({
-        message: `Service Report\n${job.customer_name} — ${job.customer_address}\n${formatDateTime(job.created_at)}\nTechnician: ${job.technician_name}\n\n${job.service_report}`,
-      });
-    } catch {}
+    if (!signerName.trim()) {
+      Alert.alert("No Name", "Please enter the customer's name.");
+      return;
+    }
+    await saveSignature(job.id, JSON.stringify(signPaths), signerName.trim());
+    setShowSignModal(false);
+    setSignPaths([]);
+    setCurrentPath("");
   };
 
-  const urgencyColor = getUrgencyColor(diagnosis.urgency);
+  if (!job) {
+    return (
+      <View style={[s.root, { alignItems: "center", justifyContent: "center" }]}>
+        <Text style={{ color: "#94A3B8" }}>Job not found</Text>
+      </View>
+    );
+  }
 
-  return (
-    <ScrollView className="flex-1 bg-slate-50" contentContainerStyle={{ paddingBottom: 48 }}>
-      {/* Job Header */}
-      <View className="bg-white px-5 pt-5 pb-4">
-        <View className="flex-row items-start justify-between">
-          <View className="flex-1 mr-3">
-            <Text className="text-xl font-bold text-slate-900">
-              {job.customer_name}
-            </Text>
-            <View className="flex-row items-center mt-1">
-              <FontAwesome name="map-marker" size={12} color="#94A3B8" />
-              <Text className="text-sm text-slate-500 ml-1.5" numberOfLines={1}>
-                {job.customer_address}
-              </Text>
-            </View>
+  const { unit, readings, findings, diagnosis, actions, photos } = job;
+  const notes = job.notes || [];
+  const clips = job.clips || [];
+
+  const tabWidth = (Dimensions.get("window").width - 32) / TABS.length;
+  const translateX = tabIndicator.interpolate({
+    inputRange: TABS.map((_, i) => i),
+    outputRange: TABS.map((_, i) => i * tabWidth),
+  });
+
+  // ─── Tab renderers ─────────────────────────────────────────────
+
+  const renderOverview = () => (
+    <ScrollView
+      style={s.tabScroll}
+      contentContainerStyle={s.tabContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Diagnosis card */}
+      <Pressable
+        style={s.diagCard}
+        onPress={() => setFocused({ kind: "diagnosis" })}
+      >
+        <View style={s.diagCardHeader}>
+          <View style={s.diagCardIcon}>
+            <FontAwesome name="heartbeat" size={18} color="#F59E0B" />
           </View>
-          {job.status === "in_progress" ? (
-            <View className="flex-row items-center bg-blue-50 px-3 py-1.5 rounded-full">
-              <View className="w-2 h-2 rounded-full bg-blue-500 mr-1.5" />
-              <Text className="text-xs font-bold text-blue-600">IN PROGRESS</Text>
-            </View>
-          ) : (
+          <View style={s.diagCardHeaderText}>
+            <Text style={s.diagCardTitle}>{diagnosis.primary_issue}</Text>
+            <Text style={s.diagCardConf}>{diagnosis.confidence} confidence</Text>
+          </View>
+          <View style={[s.urgBadge, { backgroundColor: urgencyColor + "18" }]}>
+            <Text style={[s.urgBadgeText, { color: urgencyColor }]}>
+              {diagnosis.urgency.toUpperCase()}
+            </Text>
+          </View>
+        </View>
+        <Text style={s.diagCardSummary} numberOfLines={3}>
+          {diagnosis.technical_summary}
+        </Text>
+        {diagnosis.recommended_actions.length > 0 && (
+          <View style={s.diagCardActions}>
+            {diagnosis.recommended_actions.slice(0, 2).map((a, i) => (
+              <View key={i} style={s.diagCardActionRow}>
+                <View style={s.diagDot} />
+                <Text style={s.diagCardActionText} numberOfLines={1}>
+                  {a}
+                </Text>
+              </View>
+            ))}
+            {diagnosis.recommended_actions.length > 2 && (
+              <Text style={s.diagMore}>
+                +{diagnosis.recommended_actions.length - 2} more
+              </Text>
+            )}
+          </View>
+        )}
+      </Pressable>
+
+      {findings.length > 0 &&
+        findings.map((f) => (
+          <Pressable
+            key={f.id}
+            style={s.findingCard}
+            onPress={() => setFocused({ kind: "finding", id: f.id })}
+          >
             <View
-              className="px-3 py-1.5 rounded-full"
-              style={{ backgroundColor: urgencyColor + "14" }}
-            >
-              <Text
-                className="text-xs font-bold uppercase"
-                style={{ color: urgencyColor }}
-              >
-                {diagnosis.urgency}
+              style={[s.findingStripe, { backgroundColor: getSeverityColor(f.severity) }]}
+            />
+            <View style={s.findingBody}>
+              <View style={s.findingTop}>
+                <Text style={s.findingComp}>
+                  {f.component.replace(/_/g, " ")}
+                </Text>
+                <View
+                  style={[
+                    s.findingSevBadge,
+                    { backgroundColor: getSeverityColor(f.severity) + "18" },
+                  ]}
+                >
+                  <Text
+                    style={[s.findingSevText, { color: getSeverityColor(f.severity) }]}
+                  >
+                    {f.severity}
+                  </Text>
+                </View>
+              </View>
+              <Text style={s.findingDesc} numberOfLines={2}>
+                {f.description}
               </Text>
             </View>
-          )}
-        </View>
-        <View className="flex-row items-center mt-3 flex-wrap gap-2">
-          {job.source === "jobber" && (
-            <View className="flex-row items-center bg-green-50 px-2.5 py-1 rounded-lg">
-              <FontAwesome name="calendar-check-o" size={10} color="#16A34A" />
-              <Text className="text-xs text-green-600 ml-1.5 font-bold">Jobber</Text>
-            </View>
-          )}
-          <View className="flex-row items-center bg-slate-100 px-2.5 py-1 rounded-lg">
-            <FontAwesome name="clock-o" size={10} color="#64748B" />
-            <Text className="text-xs text-slate-600 ml-1.5 font-medium">
-              {formatDateTime(job.created_at)}
+          </Pressable>
+        ))}
+
+      {/* Unit card */}
+      <Pressable onPress={() => router.push(`/unit/${unit.serial_number}`)}>
+        <View style={s.unitCard}>
+          <View style={s.unitAv}>
+            <Text style={s.unitAvText}>{unit.brand.charAt(0)}</Text>
+          </View>
+          <View style={s.unitMid}>
+            <Text style={s.unitBrand}>
+              {unit.brand} {unit.system_type}
+            </Text>
+            <Text style={s.unitModelText} numberOfLines={1}>
+              {unit.model_number}
             </Text>
           </View>
-          {job.duration_minutes > 0 && (
-            <View className="bg-slate-100 px-2.5 py-1 rounded-lg">
-              <Text className="text-xs text-slate-600 font-medium">
-                {job.duration_minutes} min
-              </Text>
-            </View>
-          )}
+          <View style={s.unitRight}>
+            <Text style={s.unitTonnage}>{unit.tonnage}T</Text>
+            <Text style={s.unitRefrig}>{unit.refrigerant_type}</Text>
+          </View>
         </View>
+      </Pressable>
+
+      {/* Quick grid */}
+      <View style={s.quickGrid}>
+        <Pressable
+          style={s.quickItem}
+          onPress={() => router.push(`/notes/${job.id}`)}
+        >
+          <View style={[s.quickIconWrap, { backgroundColor: "#EFF6FF" }]}>
+            <FontAwesome name="sticky-note-o" size={18} color="#2563EB" />
+          </View>
+          <Text style={s.quickCount}>{notes.length}</Text>
+          <Text style={s.quickLabel}>Notes</Text>
+        </Pressable>
+        <Pressable style={s.quickItem}>
+          <View style={[s.quickIconWrap, { backgroundColor: "#F0FDFA" }]}>
+            <FontAwesome name="camera" size={18} color="#0D9488" />
+          </View>
+          <Text style={s.quickCount}>{photos.length}</Text>
+          <Text style={s.quickLabel}>Photos</Text>
+        </Pressable>
+        <Pressable
+          style={s.quickItem}
+          onPress={() => router.push(`/clips/${job.id}`)}
+        >
+          <View style={[s.quickIconWrap, { backgroundColor: "#FEF2F2" }]}>
+            <FontAwesome name="video-camera" size={18} color="#DC2626" />
+          </View>
+          <Text style={s.quickCount}>{clips.length}</Text>
+          <Text style={s.quickLabel}>Clips</Text>
+        </Pressable>
+        <Pressable style={s.quickItem} onPress={() => switchTab("timeline")}>
+          <View style={[s.quickIconWrap, { backgroundColor: "#ECFEFF" }]}>
+            <FontAwesome name="bolt" size={18} color="#0891B2" />
+          </View>
+          <Text style={s.quickCount}>{actions.length}</Text>
+          <Text style={s.quickLabel}>Actions</Text>
+        </Pressable>
       </View>
 
-      {/* Story Button */}
       {job.story && (
         <Pressable
+          style={s.storyBanner}
           onPress={() => router.push(`/story/${job.id}`)}
-          className="mx-4 mt-4 rounded-2xl overflow-hidden"
-          style={{
-            backgroundColor: "#0F172A",
-            shadowColor: "#0F172A",
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.15,
-            shadowRadius: 12,
-            elevation: 6,
-          }}
         >
-          <View className="flex-row items-center px-5 py-4">
-            <View className="w-10 h-10 rounded-xl bg-white/10 items-center justify-center mr-3">
-              <FontAwesome name="film" size={16} color="#fff" />
-            </View>
-            <View className="flex-1">
-              <Text className="text-white font-bold text-sm">View Job Story</Text>
-              <Text className="text-slate-400 text-xs mt-0.5">
-                {job.story.segments.length} key moments · AI summary
-              </Text>
-            </View>
-            <FontAwesome name="chevron-right" size={12} color="#64748B" />
+          <View style={s.storyBannerIcon}>
+            <FontAwesome name="film" size={20} color="#FFF" />
           </View>
+          <View style={s.storyBannerContent}>
+            <Text style={s.storyBannerTitle}>Job Story</Text>
+            <Text style={s.storyBannerSub}>
+              {job.story.segments.length} moments captured
+            </Text>
+          </View>
+          <FontAwesome name="chevron-right" size={16} color="#64748B" />
         </Pressable>
       )}
 
-      {/* Section A — Readings */}
-      {readings.taken_at && (
-        <>
-          <SectionHeader title="Readings" icon="dashboard" />
-          <Card>
-            <View className="flex-row border-b border-slate-100 pb-1">
-              <ReadingCell
-                label="HIGH SIDE"
-                value={readings.high_side_psi}
-                unit=" PSI"
-                status={getReadingStatus(readings.high_side_psi, 200, 420)}
-              />
-              <ReadingCell
-                label="LOW SIDE"
-                value={readings.low_side_psi}
-                unit=" PSI"
-                status={getReadingStatus(readings.low_side_psi, 57, 140)}
-              />
-            </View>
-
-            <View className="flex-row border-b border-slate-100 py-1">
-              <ReadingCell
-                label="SUPERHEAT"
-                value={readings.superheat_f}
-                unit="°F"
-                status={getReadingStatus(readings.superheat_f, 10, 15)}
-                target="10-15°F"
-              />
-              <ReadingCell
-                label="SUBCOOLING"
-                value={readings.subcooling_f}
-                unit="°F"
-                status={getReadingStatus(readings.subcooling_f, 8, 12)}
-                target="8-12°F"
-              />
-            </View>
-
-            <View className="flex-row border-b border-slate-100 py-1">
-              <ReadingCell
-                label="DELTA T"
-                value={readings.delta_t_f}
-                unit="°F"
-                status={getReadingStatus(readings.delta_t_f, 16, 22)}
-                target="16-22°F"
-              />
-              <ReadingCell
-                label="OUTDOOR"
-                value={readings.outdoor_temp_f}
-                unit="°F"
-                status="normal"
-              />
-            </View>
-
-            <View className="flex-row pt-1">
-              <ReadingCell
-                label="VOLTAGE"
-                value={readings.voltage}
-                unit="V"
-                status={getReadingStatus(readings.voltage, 210, 250)}
-              />
-              <ReadingCell
-                label="AMPERAGE"
-                value={readings.amperage}
-                unit="A"
-                status="normal"
-              />
-            </View>
-
-            {readings.static_pressure_in_wc > 0 && (
-              <View className="flex-row pt-1 border-t border-slate-100">
-                <ReadingCell
-                  label="STATIC PRESSURE"
-                  value={readings.static_pressure_in_wc}
-                  unit=" in.wc"
-                  status={getReadingStatus(readings.static_pressure_in_wc, 0.2, 0.5)}
-                  target="0.2-0.5"
-                />
-                <View className="flex-1" />
-              </View>
-            )}
-          </Card>
-        </>
-      )}
-
-      {/* Section C — Unit Info */}
-      <SectionHeader title="Unit Info" icon="hdd-o" />
-      <Pressable onPress={() => router.push(`/unit/${unit.serial_number}`)}>
-        <Card>
-          <View className="flex-row items-center">
-            <View className="w-14 h-14 bg-slate-100 rounded-xl items-center justify-center mr-4">
-              <Text className="text-lg font-black text-slate-500">
-                {unit.brand.charAt(0)}
-              </Text>
-            </View>
-            <View className="flex-1">
-              <Text className="text-base font-bold text-slate-900">
-                {unit.brand}
-              </Text>
-              <Text className="text-sm text-slate-500 mt-0.5 font-mono" numberOfLines={1}>
-                {unit.model_number}
-              </Text>
-              <View className="flex-row items-center mt-2 flex-wrap gap-1.5">
-                <View className="bg-slate-100 px-2 py-0.5 rounded-md">
-                  <Text className="text-xs text-slate-600">{unit.refrigerant_type}</Text>
-                </View>
-                <View className="bg-slate-100 px-2 py-0.5 rounded-md">
-                  <Text className="text-xs text-slate-600">{unit.tonnage}T</Text>
-                </View>
-                <View className="bg-slate-100 px-2 py-0.5 rounded-md">
-                  <Text className="text-xs text-slate-600">{unit.system_type}</Text>
-                </View>
-                <View className="bg-slate-100 px-2 py-0.5 rounded-md">
-                  <Text className="text-xs text-slate-600">{unit.age_years}yr</Text>
-                </View>
-              </View>
-            </View>
-            <View className="w-7 h-7 bg-slate-100 rounded-full items-center justify-center">
-              <FontAwesome name="chevron-right" size={10} color="#94A3B8" />
-            </View>
-          </View>
-        </Card>
+      <Pressable
+        style={[s.storyBanner, { marginTop: 10, backgroundColor: "#1E3A5F" }]}
+        onPress={() => router.push(`/job/automate/${job.id}`)}
+      >
+        <View style={s.storyBannerIcon}>
+          <FontAwesome name="bolt" size={18} color="#FFF" />
+        </View>
+        <View style={s.storyBannerContent}>
+          <Text style={s.storyBannerTitle}>Automate</Text>
+          <Text style={[s.storyBannerSub, { color: "#BFDBFE" }]}>
+            Trigger reports & invoices when job completes
+          </Text>
+        </View>
+        <FontAwesome name="chevron-right" size={16} color="#BFDBFE" />
       </Pressable>
+    </ScrollView>
+  );
 
-      {/* Section C — Notes & Clips Side by Side */}
-      <SectionHeader title="Notes & Clips" icon="sticky-note-o" />
-      <View className="flex-row px-4 gap-3">
-        {/* Notes Column */}
-        <View className="flex-1">
-          <View className="flex-row items-center mb-2">
-            <FontAwesome name="pencil" size={11} color="#64748B" />
-            <Text className="text-xs font-bold text-slate-500 ml-1.5 uppercase tracking-wide">
-              Notes ({notes.length})
-            </Text>
-          </View>
-          {notes.length > 0 ? (
-            notes.slice(0, 3).map((note) => {
-              const isVision = note.source === "vision";
-              return (
-                <Pressable
-                  key={note.id}
-                  onLongPress={() => handleDeleteNote(note)}
-                  className="bg-white rounded-xl p-3 mb-2"
-                  style={{
-                    shadowColor: "#0F172A",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.04,
-                    shadowRadius: 4,
-                    elevation: 1,
-                  }}
-                >
-                  <View className="flex-row items-center mb-1.5">
-                    <View
-                      className="px-1.5 py-0.5 rounded"
-                      style={{
-                        backgroundColor: isVision ? "#7C3AED14" : "#2563EB14",
-                      }}
-                    >
-                      <Text
-                        className="text-xs font-bold"
-                        style={{ color: isVision ? "#7C3AED" : "#2563EB" }}
-                      >
-                        {isVision ? "VISION" : "MANUAL"}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text
-                    className="text-xs text-slate-700 leading-4"
-                    numberOfLines={3}
-                  >
-                    {note.text}
-                  </Text>
-                  <Text className="text-xs text-slate-300 mt-1.5">
-                    {formatDateTime(note.created_at)}
-                  </Text>
-                </Pressable>
-              );
-            })
-          ) : (
-            <View className="bg-white rounded-xl p-4 items-center">
-              <FontAwesome name="sticky-note-o" size={18} color="#CBD5E1" />
-              <Text className="text-xs text-slate-400 mt-1.5">No notes</Text>
-            </View>
-          )}
-          {notes.length > 3 && (
-            <Text className="text-xs text-slate-400 text-center mt-1">
-              +{notes.length - 3} more
-            </Text>
-          )}
-          <Pressable
-            onPress={() => setShowNoteModal(true)}
-            className="mt-2 rounded-xl py-2.5 items-center"
-            style={{ backgroundColor: "#0F172A" }}
-          >
-            <View className="flex-row items-center">
-              <FontAwesome name="plus" size={10} color="#fff" />
-              <Text className="text-white font-bold text-xs ml-1.5">Add Note</Text>
-            </View>
-          </Pressable>
+  const renderGauge = (
+    label: string,
+    value: number,
+    unitStr: string,
+    status: ReadingStatus,
+    target?: string
+  ) => {
+    const color = getStatusColor(status);
+    const isOff = status !== "normal";
+    return (
+      <View style={s.gaugeCard}>
+        <View style={s.gaugeTop}>
+          <Text style={s.gaugeLabel}>{label}</Text>
+          <View style={[s.gaugeDot, { backgroundColor: color }]} />
         </View>
-
-        {/* Clips Column */}
-        <View className="flex-1">
-          <View className="flex-row items-center mb-2">
-            <FontAwesome name="video-camera" size={11} color="#64748B" />
-            <Text className="text-xs font-bold text-slate-500 ml-1.5 uppercase tracking-wide">
-              Clips ({clips.length})
-            </Text>
-          </View>
-          {clips.length > 0 ? (
-            clips.slice(0, 3).map((clip) => (
-              <Pressable
-                key={clip.id}
-                onLongPress={() => handleDeleteClip(clip)}
-                className="bg-slate-800 rounded-xl mb-2 overflow-hidden"
-                style={{
-                  shadowColor: "#0F172A",
-                  shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.04,
-                  shadowRadius: 4,
-                  elevation: 1,
-                }}
-              >
-                <View className="h-20 items-center justify-center">
-                  <View className="w-10 h-10 rounded-full bg-white/20 items-center justify-center">
-                    <FontAwesome name="play" size={14} color="#fff" />
-                  </View>
-                  <View className="absolute bottom-2 right-2 bg-black/60 px-1.5 py-0.5 rounded">
-                    <Text className="text-xs text-white font-mono">
-                      {formatDuration(clip.duration_seconds)}
-                    </Text>
-                  </View>
-                </View>
-                <View className="bg-white px-3 py-2">
-                  <Text className="text-xs text-slate-700" numberOfLines={1}>
-                    {clip.caption || "Untitled clip"}
-                  </Text>
-                  <Text className="text-xs text-slate-300 mt-0.5">
-                    {formatDateTime(clip.recorded_at)}
-                  </Text>
-                </View>
-              </Pressable>
-            ))
-          ) : (
-            <View className="bg-white rounded-xl p-4 items-center">
-              <FontAwesome name="video-camera" size={18} color="#CBD5E1" />
-              <Text className="text-xs text-slate-400 mt-1.5">No clips</Text>
-              <Text className="text-xs text-slate-300 mt-0.5 text-center">
-                Record from glasses
-              </Text>
-            </View>
-          )}
-          {clips.length > 3 && (
-            <Text className="text-xs text-slate-400 text-center mt-1">
-              +{clips.length - 3} more
-            </Text>
-          )}
+        <View style={s.gaugeValRow}>
+          <Text style={[s.gaugeVal, isOff && { color }]}>{value}</Text>
+          <Text style={s.gaugeUnit}>{unitStr}</Text>
         </View>
+        {target && <Text style={s.gaugeTarget}>Target: {target}</Text>}
       </View>
+    );
+  };
 
-      {/* Section D — AI Findings */}
-      {findings.length > 0 && (
-        <>
-          <SectionHeader title="AI Findings" icon="eye" />
-          {findings.map((finding) => (
-            <View key={finding.id} className="mb-2">
-              <Card>
-                <View className="flex-row items-start">
-                  <View
-                    className="w-9 h-9 rounded-xl items-center justify-center mr-3"
-                    style={{ backgroundColor: getSeverityColor(finding.severity) + "12" }}
-                  >
-                    <FontAwesome
-                      name={getSeverityIcon(finding.severity)}
-                      size={16}
-                      color={getSeverityColor(finding.severity)}
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <View className="flex-row items-center">
-                      <Text className="text-sm font-bold text-slate-900 capitalize">
-                        {finding.component.replace(/_/g, " ")}
-                      </Text>
-                      <View
-                        className="ml-2 px-2 py-0.5 rounded-md"
-                        style={{ backgroundColor: getSeverityColor(finding.severity) + "14" }}
-                      >
-                        <Text
-                          className="text-xs font-bold capitalize"
-                          style={{ color: getSeverityColor(finding.severity) }}
-                        >
-                          {finding.severity}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text className="text-sm text-slate-500 mt-1.5 leading-5">
-                      {finding.description}
-                    </Text>
-                  </View>
-                </View>
-              </Card>
-            </View>
-          ))}
-        </>
-      )}
-
-      {/* Section E — Actions Taken */}
-      {actions.length > 0 && (
-        <>
-          <SectionHeader title="Actions Taken" icon="check-circle" />
-          <Card>
-            {actions.map((action, i) => (
-              <View
-                key={action.id}
-                className={`flex-row items-start ${i < actions.length - 1 ? "mb-4 pb-4 border-b border-slate-100" : ""}`}
-              >
-                <View
-                  className="w-8 h-8 rounded-xl items-center justify-center mr-3 mt-0.5"
-                  style={{ backgroundColor: "#16A34A14" }}
-                >
-                  <FontAwesome
-                    name={getActionIcon(action.type)}
-                    size={13}
-                    color="#16A34A"
-                  />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-sm font-medium text-slate-900 leading-5">
-                    {action.description}
-                  </Text>
-                  {action.quantity > 0 && (
-                    <Text className="text-xs text-slate-400 mt-1">
-                      Qty: {action.quantity} {action.unit}
-                      {action.part_number ? `  #${action.part_number}` : ""}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            ))}
-          </Card>
-        </>
-      )}
-
-      {/* Section F — Service Report */}
-      {job.service_report ? (
-        <>
-          <SectionHeader title="Service Report" icon="file-text-o" />
-          <Card>
-            <Text className="text-sm text-slate-600 leading-6">
-              {job.service_report}
-            </Text>
-          </Card>
-          <View className="flex-row mx-4 mt-3 gap-3">
-            <Pressable
-              onPress={() => {
-                setEmailMode("simple");
-                setShowEmailModal(true);
-              }}
-              className="flex-1 rounded-2xl py-4 items-center"
-              style={{ backgroundColor: "#0F172A" }}
-            >
-              <View className="flex-row items-center">
-                <FontAwesome name="envelope-o" size={14} color="#fff" />
-                <Text className="text-white font-bold text-sm ml-2">
-                  Email
-                </Text>
-              </View>
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                setEmailMode("pdf");
-                setShowEmailModal(true);
-              }}
-              className="flex-1 rounded-2xl py-4 items-center"
-              style={{ backgroundColor: "#2563EB" }}
-            >
-              <View className="flex-row items-center">
-                <FontAwesome name="file-pdf-o" size={14} color="#fff" />
-                <Text className="text-white font-bold text-sm ml-2">
-                  Detailed Report
-                </Text>
-              </View>
-            </Pressable>
-          </View>
-        </>
+  const renderReadings = () => (
+    <ScrollView
+      style={s.tabScroll}
+      contentContainerStyle={s.tabContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {!readings.taken_at ? (
+        <View style={s.emptyReport}>
+          <FontAwesome name="dashboard" size={40} color="#CBD5E1" />
+          <Text style={s.emptyReportTitle}>No Readings Yet</Text>
+          <Text style={s.emptyReportDesc}>
+            Gauges appear once the tech logs readings.
+          </Text>
+        </View>
       ) : (
         <>
-          <SectionHeader title="Service Report" icon="file-text-o" />
-          <Card>
-            <View className="items-center py-6">
-              <FontAwesome name="file-text-o" size={24} color="#CBD5E1" />
-              <Text className="text-sm text-slate-400 mt-2">
-                Report generated when job completes.
-              </Text>
-            </View>
-          </Card>
-        </>
-      )}
-
-      {/* QuickBooks Invoice */}
-      {job.status === "completed" && (
-        <>
-          <SectionHeader title="Invoice" icon="file-text" />
-          {invoiceCreated ? (
-            <Card>
-              <View className="flex-row items-center">
-                <View className="w-10 h-10 rounded-xl bg-green-50 items-center justify-center mr-3">
-                  <FontAwesome name="check-circle" size={20} color="#16A34A" />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-sm font-bold text-slate-900">
-                    Invoice #{invoiceCreated.docNumber}
-                  </Text>
-                  <Text className="text-xs text-slate-400 mt-0.5">
-                    ${invoiceCreated.totalAmount} · Sent to QuickBooks
-                  </Text>
-                </View>
-              </View>
-            </Card>
-          ) : (
-            <Pressable
-              onPress={handleCreateInvoice}
-              disabled={invoiceLoading}
-              className="mx-4 rounded-2xl py-4 items-center"
-              style={{ backgroundColor: invoiceLoading ? "#86EFAC" : "#16A34A" }}
-            >
-              {invoiceLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <View className="flex-row items-center">
-                  <FontAwesome name="book" size={14} color="#fff" />
-                  <Text className="text-white font-bold text-sm ml-2">
-                    Create QuickBooks Invoice
-                  </Text>
-                </View>
+          <View style={s.gaugeSection}>
+            <Text style={s.gaugeSectionTitle}>Pressure</Text>
+            <View style={s.gaugeRow}>
+              {renderGauge(
+                "High Side",
+                readings.high_side_psi,
+                "PSI",
+                getReadingStatus(readings.high_side_psi, 200, 420)
               )}
-            </Pressable>
+              {renderGauge(
+                "Low Side",
+                readings.low_side_psi,
+                "PSI",
+                getReadingStatus(readings.low_side_psi, 57, 140)
+              )}
+            </View>
+          </View>
+          <View style={s.gaugeSection}>
+            <Text style={s.gaugeSectionTitle}>Temperature</Text>
+            <View style={s.gaugeRow}>
+              {renderGauge(
+                "Superheat",
+                readings.superheat_f,
+                "°F",
+                getReadingStatus(readings.superheat_f, 10, 15),
+                "10-15"
+              )}
+              {renderGauge(
+                "Subcooling",
+                readings.subcooling_f,
+                "°F",
+                getReadingStatus(readings.subcooling_f, 8, 12),
+                "8-12"
+              )}
+            </View>
+            <View style={s.gaugeRow}>
+              {renderGauge(
+                "Delta T",
+                readings.delta_t_f,
+                "°F",
+                getReadingStatus(readings.delta_t_f, 16, 22),
+                "16-22"
+              )}
+              {renderGauge("Outdoor", readings.outdoor_temp_f, "°F", "normal")}
+            </View>
+          </View>
+          <View style={s.gaugeSection}>
+            <Text style={s.gaugeSectionTitle}>Electrical</Text>
+            <View style={s.gaugeRow}>
+              {renderGauge(
+                "Voltage",
+                readings.voltage,
+                "V",
+                getReadingStatus(readings.voltage, 210, 250)
+              )}
+              {renderGauge("Amperage", readings.amperage, "A", "normal")}
+            </View>
+          </View>
+          {readings.static_pressure_in_wc > 0 && (
+            <View style={s.gaugeSection}>
+              <Text style={s.gaugeSectionTitle}>Airflow</Text>
+              <View style={s.gaugeRow}>
+                {renderGauge(
+                  "Static Press.",
+                  readings.static_pressure_in_wc,
+                  "in.wc",
+                  getReadingStatus(readings.static_pressure_in_wc, 0.2, 0.5),
+                  "0.2-0.5"
+                )}
+                <View style={s.gaugeCard} />
+              </View>
+            </View>
           )}
+          <Text style={s.readingTimestamp}>
+            Taken {formatDateTime(readings.taken_at)}
+          </Text>
         </>
       )}
+    </ScrollView>
+  );
 
-      {/* Section G — Photos */}
-      {photos.length > 0 && (
+  const renderTimeline = () => (
+    <ScrollView
+      style={s.tabScroll}
+      contentContainerStyle={s.tabContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {actions.map((action, i) => (
+        <View key={action.id} style={s.tlItem}>
+          <View style={s.tlLeft}>
+            <View style={s.tlDot}>
+              <FontAwesome
+                name={getActionIcon(action.type)}
+                size={12}
+                color="#FFF"
+              />
+            </View>
+            {i < actions.length - 1 && <View style={s.tlLine} />}
+          </View>
+          <View style={s.tlContent}>
+            <Text style={s.tlTime}>{formatTime(action.timestamp)}</Text>
+            <Text style={s.tlDesc}>{action.description}</Text>
+            {action.quantity > 0 && (
+              <Text style={s.tlQty}>
+                {action.quantity} {action.unit}
+              </Text>
+            )}
+          </View>
+        </View>
+      ))}
+
+      <View style={s.tlSectionDivider}>
+        <Text style={s.tlSectionLabel}>NOTES ({notes.length})</Text>
+      </View>
+      {notes.slice(0, 2).map((note) => (
+        <Pressable
+          key={note.id}
+          onLongPress={() => handleDeleteNote(note)}
+          style={s.notePreview}
+        >
+          <View style={s.notePreviewIcon}>
+            <FontAwesome
+              name={note.source === "vision" ? "eye" : "pencil"}
+              size={13}
+              color={note.source === "vision" ? "#06B6D4" : "#64748B"}
+            />
+          </View>
+          <View style={s.notePreviewContent}>
+            <Text style={s.notePreviewText} numberOfLines={2}>
+              {note.text}
+            </Text>
+            <Text style={s.notePreviewMeta}>
+              {note.created_by} · {formatTime(note.created_at)}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+      <Pressable
+        style={s.viewAllBtn}
+        onPress={() => router.push(`/notes/${job.id}`)}
+      >
+        <Text style={s.viewAllText}>View all notes</Text>
+        <FontAwesome name="chevron-right" size={12} color="#06B6D4" />
+      </Pressable>
+
+      {clips.length > 0 && (
         <>
-          <SectionHeader title={`Photos (${photos.length})`} icon="camera" />
+          <View style={s.tlSectionDivider}>
+            <Text style={s.tlSectionLabel}>CLIPS ({clips.length})</Text>
+          </View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 16 }}
+            contentContainerStyle={s.clipScroll}
+          >
+            {clips.map((clip) => {
+              const thumbAsset = CLIP_THUMBS[clip.id];
+              const thumbSource = thumbAsset
+                ? thumbAsset
+                : clip.thumbnail_path
+                ? { uri: clip.thumbnail_path }
+                : null;
+              return (
+                <Pressable
+                  key={clip.id}
+                  onPress={() => setPlayingClip(clip)}
+                  onLongPress={() => handleDeleteClip(clip)}
+                  style={s.clipThumb}
+                >
+                  <View style={s.clipThumbBg}>
+                    {thumbSource && (
+                      <Image
+                        source={thumbSource}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                        }}
+                        resizeMode="cover"
+                      />
+                    )}
+                    <View style={s.clipPlayBtn}>
+                      <FontAwesome name="play" size={14} color="#FFF" />
+                    </View>
+                    <View style={s.clipDurBadge}>
+                      <Text style={s.clipDurText}>
+                        {formatDuration(clip.duration_seconds)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={s.clipThumbCap} numberOfLines={1}>
+                    {clip.caption || "Untitled clip"}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </>
+      )}
+
+      {photos.length > 0 && (
+        <>
+          <View style={s.tlSectionDivider}>
+            <Text style={s.tlSectionLabel}>PHOTOS ({photos.length})</Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.clipScroll}
           >
             {photos.map((photo) => (
-              <View
-                key={photo.id}
-                className="w-36 h-36 bg-slate-200 rounded-2xl mr-3 items-center justify-center overflow-hidden"
-              >
-                <FontAwesome name="camera" size={22} color="#94A3B8" />
-                <Text
-                  className="text-xs text-slate-500 mt-2 px-3 text-center"
-                  numberOfLines={2}
-                >
+              <View key={photo.id} style={s.photoThumb}>
+                <View style={s.photoThumbBg}>
+                  <FontAwesome name="camera" size={20} color="#94A3B8" />
+                </View>
+                <Text style={s.photoThumbCap} numberOfLines={1}>
                   {photo.caption}
                 </Text>
               </View>
@@ -1146,14 +906,97 @@ export default function JobDetailScreen() {
           </ScrollView>
         </>
       )}
-      {/* Section H — Customer Signature */}
-      <SectionHeader title="Customer Signature" icon="pencil-square-o" />
-      {job.signature ? (
-        <Card>
-          <View className="items-center py-2">
+    </ScrollView>
+  );
+
+  const renderReport = () => (
+    <ScrollView
+      style={s.tabScroll}
+      contentContainerStyle={s.tabContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {job.service_report ? (
+        <View style={s.reportCard}>
+          <Text style={s.reportText}>{job.service_report}</Text>
+        </View>
+      ) : (
+        <View style={s.emptyReport}>
+          <FontAwesome name="file-text-o" size={40} color="#CBD5E1" />
+          <Text style={s.emptyReportTitle}>No Report Yet</Text>
+          <Text style={s.emptyReportDesc}>
+            Report will be generated when the job is completed.
+          </Text>
+        </View>
+      )}
+
+      {job.service_report && (
+        <View style={s.reportBtns}>
+          <Pressable
+            style={s.reportBtnPrimary}
+            onPress={() => {
+              setEmailMode("simple");
+              setShowEmailModal(true);
+            }}
+          >
+            <FontAwesome name="envelope-o" size={16} color="#FFF" />
+            <Text style={s.reportBtnPrimaryText}>Email Summary</Text>
+          </Pressable>
+          <Pressable
+            style={s.reportBtnSecondary}
+            onPress={() => {
+              setEmailMode("pdf");
+              setShowEmailModal(true);
+            }}
+          >
+            <FontAwesome name="file-pdf-o" size={16} color="#0F172A" />
+            <Text style={s.reportBtnSecondaryText}>Detailed PDF</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {job.status === "completed" && (
+        <View style={[s.sigSection, { marginBottom: 12 }]}>
+          <Text style={s.sigSectionTitle}>Invoice</Text>
+          {invoiceCreated ? (
+            <View style={s.sigDone}>
+              <FontAwesome name="check-circle" size={18} color="#16A34A" />
+              <Text style={s.sigDoneText}>
+                Invoice #{invoiceCreated.docNumber} · ${invoiceCreated.totalAmount}
+              </Text>
+            </View>
+          ) : (
+            <Pressable
+              style={s.sigCollectBtn}
+              onPress={handleCreateInvoice}
+              disabled={invoiceLoading}
+            >
+              {invoiceLoading ? (
+                <ActivityIndicator size="small" color="#16A34A" />
+              ) : (
+                <FontAwesome name="book" size={18} color="#16A34A" />
+              )}
+              <View style={s.sigCollectContent}>
+                <Text style={s.sigCollectTitle}>Create QuickBooks Invoice</Text>
+                <Text style={s.sigCollectDesc}>Sync job to QuickBooks</Text>
+              </View>
+              <FontAwesome name="chevron-right" size={14} color="#CBD5E1" />
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      <View style={s.sigSection}>
+        <Text style={s.sigSectionTitle}>Customer Signature</Text>
+        {job.signature ? (
+          <View>
             <View
-              className="w-full rounded-xl overflow-hidden bg-slate-50"
-              style={{ height: 120 }}
+              style={{
+                height: 120,
+                backgroundColor: "#F8FAFC",
+                borderRadius: 10,
+                overflow: "hidden",
+                marginBottom: 10,
+              }}
             >
               <Svg width="100%" height="100%" viewBox="0 0 340 120">
                 {JSON.parse(job.signature.paths).map((p: string, i: number) => (
@@ -1169,61 +1012,407 @@ export default function JobDetailScreen() {
                 ))}
               </Svg>
             </View>
-            <View className="flex-row items-center mt-3">
-              <FontAwesome name="check-circle" size={12} color="#16A34A" />
-              <Text className="text-xs text-slate-500 ml-1.5">
-                Signed by {job.signature.signed_by} · {formatDateTime(job.signature.signed_at)}
+            <View style={s.sigDone}>
+              <FontAwesome name="check-circle" size={18} color="#16A34A" />
+              <Text style={s.sigDoneText}>
+                Signed by {job.signature.signed_by}
               </Text>
             </View>
           </View>
-        </Card>
-      ) : (
-        <Pressable
-          onPress={() => {
-            setSignPaths([]);
-            setCurrentPath("");
-            setSignerName(job.customer_name);
-            setShowSignModal(true);
-          }}
-          className="mx-4 rounded-2xl py-4 items-center"
-          style={{ backgroundColor: "#0F172A" }}
-        >
-          <View className="flex-row items-center">
-            <FontAwesome name="pencil-square-o" size={15} color="#fff" />
-            <Text className="text-white font-bold text-sm ml-2">
-              Get Customer Signature
+        ) : (
+          <Pressable style={s.sigCollectBtn} onPress={openSignModal}>
+            <FontAwesome name="pencil-square-o" size={18} color="#06B6D4" />
+            <View style={s.sigCollectContent}>
+              <Text style={s.sigCollectTitle}>Collect Signature</Text>
+              <Text style={s.sigCollectDesc}>Tap to open signature pad</Text>
+            </View>
+            <FontAwesome name="chevron-right" size={14} color="#CBD5E1" />
+          </Pressable>
+        )}
+      </View>
+    </ScrollView>
+  );
+
+  // ─── Main return ────────────────────────────────────────────────
+
+  return (
+    <View style={s.root}>
+      {/* Header */}
+      <View style={[s.header, { paddingTop: insets.top + 8 }]}>
+        <View style={s.headerRow}>
+          <Pressable onPress={() => router.back()} style={s.backBtn}>
+            <FontAwesome name="chevron-left" size={14} color="#FFF" />
+          </Pressable>
+          <View style={s.headerLeft}>
+            <Text style={s.custName}>{job.customer_name}</Text>
+            <View style={s.addrRow}>
+              <FontAwesome name="map-marker" size={11} color="#64748B" />
+              <Text style={s.addrText} numberOfLines={1}>
+                {job.customer_address}
+              </Text>
+            </View>
+          </View>
+          <View style={s.headerRight}>
+            {job.status === "in_progress" ? (
+              <View style={s.liveBadge}>
+                <View style={s.liveDotSmall} />
+                <Text style={s.liveText}>LIVE</Text>
+              </View>
+            ) : (
+              <View
+                style={[s.urgBadgeSmall, { backgroundColor: urgencyColor + "20" }]}
+              >
+                <Text style={[s.urgBadgeSmallText, { color: urgencyColor }]}>
+                  {diagnosis.urgency.toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <Pressable style={s.callBtn} onPress={callCustomer}>
+              <FontAwesome name="phone" size={14} color="#06B6D4" />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={s.metaChips}>
+          <View style={s.chip}>
+            <FontAwesome name="clock-o" size={10} color="#94A3B8" />
+            <Text style={s.chipText}>{job.duration_minutes}m</Text>
+          </View>
+          <View style={s.chip}>
+            <FontAwesome name="hourglass-half" size={10} color="#94A3B8" />
+            <Text style={s.chipText}>{formatDateTime(job.created_at)}</Text>
+          </View>
+          <View style={s.chip}>
+            <Text style={s.chipTextTeal}>
+              {unit.brand} {unit.tonnage}T
             </Text>
           </View>
+        </View>
+
+        <View style={s.tabBar}>
+          <Animated.View
+            style={[
+              s.tabIndicator,
+              {
+                width: tabWidth - 8,
+                transform: [{ translateX: Animated.add(translateX, 4) }],
+              },
+            ]}
+          />
+          {TABS.map((tab) => (
+            <Pressable
+              key={tab.id}
+              style={s.tabBtn}
+              onPress={() => switchTab(tab.id)}
+            >
+              <Text
+                style={[s.tabLabel, activeTab === tab.id && s.tabLabelActive]}
+              >
+                {tab.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      <View style={s.content}>
+        {activeTab === "overview" && renderOverview()}
+        {activeTab === "readings" && renderReadings()}
+        {activeTab === "timeline" && renderTimeline()}
+        {activeTab === "report" && renderReport()}
+      </View>
+
+      {/* Bottom bar */}
+      <View style={[s.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {!job.signature ? (
+          <Pressable style={s.bottomPrimary} onPress={openSignModal}>
+            <FontAwesome name="pencil-square-o" size={16} color="#FFF" />
+            <Text style={s.bottomPrimaryText}>Collect Signature</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={s.bottomPrimary}
+            onPress={() => {
+              setEmailMode("simple");
+              setShowEmailModal(true);
+            }}
+          >
+            <FontAwesome name="send" size={16} color="#FFF" />
+            <Text style={s.bottomPrimaryText}>Send Report</Text>
+          </Pressable>
+        )}
+        <Pressable style={s.bottomSecondary} onPress={() => setShowNoteModal(true)}>
+          <FontAwesome name="plus" size={18} color="#0F172A" />
         </Pressable>
-      )}
+      </View>
+
+      {/* Focus Modal (diagnosis / finding) */}
+      <Modal
+        visible={focused !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setFocused(null)}
+      >
+        <BlurView intensity={40} tint="dark" style={s.focusBackdrop}>
+          <Pressable
+            style={{ flex: 1, width: "100%" }}
+            onPress={() => setFocused(null)}
+          />
+          <View style={s.focusSheet}>
+            {focused?.kind === "diagnosis" && (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={s.focusHeader}>
+                  <View style={s.diagCardIcon}>
+                    <FontAwesome name="heartbeat" size={18} color="#F59E0B" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.focusTitle}>{diagnosis.primary_issue}</Text>
+                    <Text style={s.diagCardConf}>
+                      {diagnosis.confidence} confidence
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      s.urgBadge,
+                      { backgroundColor: urgencyColor + "18" },
+                    ]}
+                  >
+                    <Text
+                      style={[s.urgBadgeText, { color: urgencyColor }]}
+                    >
+                      {diagnosis.urgency.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.focusSectionLabel}>Technical Summary</Text>
+                <Text style={s.focusBody}>{diagnosis.technical_summary}</Text>
+                {diagnosis.recommended_actions.length > 0 && (
+                  <>
+                    <Text style={s.focusSectionLabel}>Recommended Actions</Text>
+                    {diagnosis.recommended_actions.map((a, i) => (
+                      <View key={i} style={s.focusActionRow}>
+                        <View style={s.focusActionNum}>
+                          <Text style={s.focusActionNumText}>{i + 1}</Text>
+                        </View>
+                        <Text style={s.focusActionText}>{a}</Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+                {diagnosis.parts_needed.length > 0 && (
+                  <>
+                    <Text style={s.focusSectionLabel}>Parts Needed</Text>
+                    {diagnosis.parts_needed.map((p, i) => (
+                      <View key={i} style={s.focusPartRow}>
+                        <Text style={s.focusPartName}>{p.name}</Text>
+                        <Text style={s.focusPartSpec}>{p.spec}</Text>
+                        <Text style={s.focusPartReason}>{p.reason}</Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </ScrollView>
+            )}
+
+            {focused?.kind === "finding" &&
+              (() => {
+                const f = findings.find((x) => x.id === focused.id);
+                if (!f) return null;
+                const color = getSeverityColor(f.severity);
+                return (
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                    <View style={s.focusHeader}>
+                      <View
+                        style={[
+                          s.diagCardIcon,
+                          { backgroundColor: color + "18" },
+                        ]}
+                      >
+                        <FontAwesome
+                          name="exclamation-circle"
+                          size={18}
+                          color={color}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.focusTitle}>
+                          {f.component.replace(/_/g, " ")}
+                        </Text>
+                        <Text style={s.diagCardConf}>
+                          {f.type.replace(/_/g, " ")}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          s.urgBadge,
+                          { backgroundColor: color + "18" },
+                        ]}
+                      >
+                        <Text style={[s.urgBadgeText, { color }]}>
+                          {f.severity.toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={s.focusSectionLabel}>Details</Text>
+                    <Text style={s.focusBody}>{f.description}</Text>
+                  </ScrollView>
+                );
+              })()}
+
+            <Pressable
+              style={s.focusCloseBtn}
+              onPress={() => setFocused(null)}
+            >
+              <Text style={s.focusCloseText}>Close</Text>
+            </Pressable>
+          </View>
+        </BlurView>
+      </Modal>
+
+      {/* Clip Player Modal */}
+      <Modal
+        visible={playingClip !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPlayingClip(null)}
+        statusBarTranslucent
+      >
+        <StatusBar barStyle="light-content" />
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.95)",
+            justifyContent: "center",
+          }}
+        >
+          <Pressable
+            onPress={() => setPlayingClip(null)}
+            style={{
+              position: "absolute",
+              top: 56,
+              right: 20,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2,
+            }}
+            hitSlop={16}
+          >
+            <FontAwesome name="times" size={18} color="#FFF" />
+          </Pressable>
+          {playingClip && (
+            <>
+              <Video
+                source={
+                  CLIP_VIDEOS[playingClip.id]
+                    ? CLIP_VIDEOS[playingClip.id]
+                    : { uri: playingClip.file_path }
+                }
+                style={{ width: "100%", aspectRatio: 16 / 9 }}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay
+                isLooping={false}
+              />
+              <View style={{ paddingHorizontal: 24, paddingTop: 20 }}>
+                <Text
+                  style={{
+                    color: "#FFF",
+                    fontSize: 15,
+                    fontWeight: "600",
+                    textAlign: "center",
+                  }}
+                >
+                  {playingClip.caption || "Untitled clip"}
+                </Text>
+                <Text
+                  style={{
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: 12,
+                    marginTop: 6,
+                    textAlign: "center",
+                  }}
+                >
+                  {playingClip.recorded_by} ·{" "}
+                  {formatDuration(playingClip.duration_seconds)}
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
+
+      {/* Email Modal */}
+      <Modal
+        visible={showEmailModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowEmailModal(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={s.modalCont}
+        >
+          <View style={s.modalHdr}>
+            <Pressable onPress={() => setShowEmailModal(false)}>
+              <Text style={s.modalCancel}>Cancel</Text>
+            </Pressable>
+            <Text style={s.modalTitleText}>
+              {emailMode === "pdf" ? "Send Report" : "Email Summary"}
+            </Text>
+            <Pressable onPress={handleEmailReport} disabled={emailSending}>
+              {emailSending ? (
+                <ActivityIndicator size="small" color="#06B6D4" />
+              ) : (
+                <Text style={s.modalSend}>Send</Text>
+              )}
+            </Pressable>
+          </View>
+          <View style={s.modalBody}>
+            <Text style={s.modalLabel}>Recipient Email</Text>
+            <TextInput
+              style={s.modalInput}
+              placeholder="customer@email.com"
+              placeholderTextColor="#CBD5E1"
+              value={emailTo}
+              onChangeText={setEmailTo}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={s.modalPrev}>
+              <View style={s.modalPrevHdr}>
+                <FontAwesome name="envelope-o" size={13} color="#64748B" />
+                <Text style={s.modalPrevTitle}>Preview</Text>
+              </View>
+              <Text style={s.modalPrevText} numberOfLines={5}>
+                {emailMode === "pdf"
+                  ? `Full diagnostic report for ${job.customer_name}'s ${unit.brand} system.`
+                  : job.service_report}
+              </Text>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Add Note Modal */}
       <Modal visible={showNoteModal} animationType="slide" transparent>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          className="flex-1 justify-end"
+          style={{ flex: 1, justifyContent: "flex-end" }}
         >
           <Pressable
-            className="flex-1"
+            style={{ flex: 1 }}
             onPress={() => setShowNoteModal(false)}
           />
-          <View
-            className="bg-white rounded-t-3xl px-5 pt-6 pb-10"
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: -4 },
-              shadowOpacity: 0.1,
-              shadowRadius: 12,
-              elevation: 10,
-            }}
-          >
-            <Text className="text-lg font-bold text-slate-900 mb-1">
-              New Note
-            </Text>
-            <Text className="text-sm text-slate-400 mb-5">
+          <View style={s.sheet}>
+            <Text style={s.sheetTitle}>New Note</Text>
+            <Text style={s.sheetSubtitle}>
               {job.customer_name} — {job.customer_address}
             </Text>
-
             <TextInput
               value={noteText}
               onChangeText={setNoteText}
@@ -1232,157 +1421,64 @@ export default function JobDetailScreen() {
               multiline
               numberOfLines={5}
               textAlignVertical="top"
-              className="bg-slate-50 rounded-xl px-4 py-3.5 text-sm text-slate-900 mb-6"
-              style={{ minHeight: 120 }}
+              style={s.sheetInput}
               autoFocus
             />
-
-            <View className="flex-row gap-3">
+            <View style={{ flexDirection: "row", gap: 12 }}>
               <Pressable
                 onPress={() => {
                   setShowNoteModal(false);
                   setNoteText("");
                 }}
-                className="flex-1 py-4 rounded-2xl items-center bg-slate-100"
+                style={s.sheetBtnSecondary}
               >
-                <Text className="text-sm font-bold text-slate-600">Cancel</Text>
+                <Text style={s.sheetBtnSecondaryText}>Cancel</Text>
               </Pressable>
-              <Pressable
-                onPress={handleAddNote}
-                className="flex-1 py-4 rounded-2xl items-center"
-                style={{ backgroundColor: "#0F172A" }}
-              >
-                <View className="flex-row items-center">
-                  <FontAwesome name="check" size={13} color="#fff" />
-                  <Text className="text-sm font-bold text-white ml-1.5">Save</Text>
-                </View>
+              <Pressable onPress={handleAddNote} style={s.sheetBtnPrimary}>
+                <FontAwesome name="check" size={13} color="#FFF" />
+                <Text style={s.sheetBtnPrimaryText}>Save</Text>
               </Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Email Report Modal */}
-      <Modal visible={showEmailModal} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          className="flex-1 justify-end"
-        >
-          <Pressable
-            className="flex-1"
-            onPress={() => setShowEmailModal(false)}
-          />
-          <View
-            className="bg-white rounded-t-3xl px-5 pt-6 pb-10"
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: -4 },
-              shadowOpacity: 0.1,
-              shadowRadius: 12,
-              elevation: 10,
-            }}
-          >
-            <View className="flex-row items-center mb-1">
-              <FontAwesome
-                name={emailMode === "pdf" ? "file-pdf-o" : "envelope"}
-                size={18}
-                color={emailMode === "pdf" ? "#DC2626" : "#2563EB"}
-              />
-              <Text className="text-lg font-bold text-slate-900 ml-2">
-                {emailMode === "pdf" ? "Detailed Report" : "Email Report"}
-              </Text>
-            </View>
-            {emailMode === "pdf" && (
-              <View className="bg-red-50 rounded-lg px-3 py-2 mb-2">
-                <Text className="text-xs text-red-600">
-                  Includes readings, findings, diagnosis, actions, and notes
-                </Text>
-              </View>
-            )}
-            <Text className="text-sm text-slate-400 mb-5">
-              {job.customer_name} — {job.customer_address}
-            </Text>
-
-            <Text className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">
-              Recipient Email
-            </Text>
-            <TextInput
-              value={emailTo}
-              onChangeText={setEmailTo}
-              placeholder="e.g. manager@company.com"
-              placeholderTextColor="#94A3B8"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              className="bg-slate-50 rounded-xl px-4 py-3.5 text-sm text-slate-900 mb-6"
-              autoFocus
-            />
-
-            <View className="flex-row gap-3">
-              <Pressable
-                onPress={() => {
-                  setShowEmailModal(false);
-                  setEmailTo("");
-                }}
-                className="flex-1 py-4 rounded-2xl items-center bg-slate-100"
-              >
-                <Text className="text-sm font-bold text-slate-600">Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleEmailReport}
-                disabled={emailSending}
-                className="flex-1 py-4 rounded-2xl items-center"
-                style={{ backgroundColor: emailSending ? "#93C5FD" : "#2563EB" }}
-              >
-                {emailSending ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <View className="flex-row items-center">
-                    <FontAwesome name="send" size={13} color="#fff" />
-                    <Text className="text-sm font-bold text-white ml-1.5">
-                      Send
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
       {/* Signature Modal */}
       <Modal visible={showSignModal} animationType="slide" transparent>
-        <View className="flex-1 justify-end" style={{ backgroundColor: "rgba(0,0,0,0.4)" }}>
-          <Pressable className="flex-1" onPress={() => setShowSignModal(false)} />
-          <View
-            className="bg-white rounded-t-3xl px-5 pt-6 pb-10"
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: -4 },
-              shadowOpacity: 0.1,
-              shadowRadius: 12,
-              elevation: 10,
-            }}
-          >
-            <Text className="text-lg font-bold text-slate-900 mb-1">
-              Customer Signature
-            </Text>
-            <Text className="text-sm text-slate-400 mb-4">
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,0.4)",
+          }}
+        >
+          <Pressable
+            style={{ flex: 1 }}
+            onPress={() => setShowSignModal(false)}
+          />
+          <View style={s.sheet}>
+            <Text style={s.sheetTitle}>Customer Signature</Text>
+            <Text style={s.sheetSubtitle}>
               Please sign below to confirm the work has been completed.
             </Text>
-
-            {/* Signer name */}
             <TextInput
               value={signerName}
               onChangeText={setSignerName}
               placeholder="Customer name"
               placeholderTextColor="#94A3B8"
-              className="bg-slate-50 rounded-xl px-4 py-3 text-sm text-slate-900 mb-4"
+              style={[s.sheetInput, { minHeight: 0, marginBottom: 14 }]}
             />
-
-            {/* Signature canvas */}
             <View
-              className="bg-slate-50 rounded-xl overflow-hidden border-2 border-dashed border-slate-200"
-              style={{ height: 160 }}
+              style={{
+                backgroundColor: "#F8FAFC",
+                borderRadius: 12,
+                overflow: "hidden",
+                borderWidth: 2,
+                borderColor: "#E2E8F0",
+                borderStyle: "dashed",
+                height: 160,
+                marginBottom: 16,
+              }}
               {...signPanResponder.panHandlers}
             >
               <Svg width="100%" height="100%">
@@ -1420,64 +1516,792 @@ export default function JobDetailScreen() {
                     justifyContent: "center",
                   }}
                 >
-                  <Text className="text-sm text-slate-300">Sign here</Text>
+                  <Text style={{ color: "#CBD5E1" }}>Sign here</Text>
                 </View>
               )}
             </View>
-
-            {/* Buttons */}
-            <View className="flex-row gap-3 mt-5">
+            <View style={{ flexDirection: "row", gap: 12 }}>
               <Pressable
                 onPress={() => {
                   setSignPaths([]);
                   setCurrentPath("");
                 }}
-                className="py-4 px-5 rounded-2xl items-center bg-slate-100"
+                style={s.sheetBtnSecondary}
               >
-                <Text className="text-sm font-bold text-slate-600">Clear</Text>
+                <Text style={s.sheetBtnSecondaryText}>Clear</Text>
               </Pressable>
-              <Pressable
-                onPress={() => {
-                  setShowSignModal(false);
-                  setSignPaths([]);
-                }}
-                className="flex-1 py-4 rounded-2xl items-center bg-slate-100"
-              >
-                <Text className="text-sm font-bold text-slate-600">Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={async () => {
-                  if (signPaths.length === 0) {
-                    Alert.alert("No Signature", "Please sign before saving.");
-                    return;
-                  }
-                  if (!signerName.trim()) {
-                    Alert.alert("No Name", "Please enter the customer's name.");
-                    return;
-                  }
-                  await saveSignature(
-                    job.id,
-                    JSON.stringify(signPaths),
-                    signerName.trim()
-                  );
-                  setShowSignModal(false);
-                  setSignPaths([]);
-                  setCurrentPath("");
-                }}
-                className="flex-1 py-4 rounded-2xl items-center"
-                style={{ backgroundColor: "#0F172A" }}
-              >
-                <View className="flex-row items-center">
-                  <FontAwesome name="check" size={13} color="#fff" />
-                  <Text className="text-sm font-bold text-white ml-1.5">
-                    Save
-                  </Text>
-                </View>
+              <Pressable onPress={saveSig} style={s.sheetBtnPrimary}>
+                <FontAwesome name="check" size={13} color="#FFF" />
+                <Text style={s.sheetBtnPrimaryText}>Save</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
+
+// ─── Styles ────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: "#F1F5F9" },
+
+  header: { backgroundColor: "#1E3A5F", paddingHorizontal: 16, paddingBottom: 0 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#1E293B",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  headerLeft: { flex: 1, marginRight: 12 },
+  custName: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#FFF",
+    letterSpacing: -0.3,
+  },
+  addrRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  addrText: { fontSize: 13, color: "#64748B", flex: 1 },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  liveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#06B6D420",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 5,
+  },
+  liveDotSmall: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#06B6D4",
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#06B6D4",
+    letterSpacing: 0.8,
+  },
+  urgBadgeSmall: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  urgBadgeSmallText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
+  callBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#1E293B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metaChips: { flexDirection: "row", gap: 6, marginTop: 10 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1E293B",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  chipText: { fontSize: 11, color: "#94A3B8", fontWeight: "500" },
+  chipTextTeal: { fontSize: 11, color: "#06B6D4", fontWeight: "600" },
+
+  tabBar: {
+    flexDirection: "row",
+    marginTop: 14,
+    marginBottom: 0,
+    position: "relative",
+  },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    height: 3,
+    backgroundColor: "#06B6D4",
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+  },
+  tabBtn: { flex: 1, alignItems: "center", paddingVertical: 12 },
+  tabLabel: { fontSize: 13, fontWeight: "600", color: "#64748B" },
+  tabLabelActive: { color: "#FFFFFF" },
+
+  content: { flex: 1 },
+  tabScroll: { flex: 1 },
+  tabContent: { padding: 16, paddingBottom: 24 },
+
+  diagCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  diagCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  diagCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  diagCardHeaderText: { flex: 1 },
+  diagCardTitle: { fontSize: 16, fontWeight: "700", color: "#0F172A" },
+  diagCardConf: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 1,
+    textTransform: "capitalize",
+  },
+  urgBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  urgBadgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  diagCardSummary: {
+    fontSize: 13,
+    color: "#475569",
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  diagCardActions: {
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    paddingTop: 12,
+  },
+  diagCardActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  diagDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#06B6D4" },
+  diagCardActionText: { fontSize: 12, color: "#64748B", flex: 1 },
+  diagMore: { fontSize: 12, color: "#06B6D4", fontWeight: "600", marginTop: 4 },
+
+  findingCard: {
+    flexDirection: "row",
+    backgroundColor: "#FFF",
+    borderRadius: 14,
+    marginBottom: 10,
+    overflow: "hidden",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  findingStripe: { width: 4 },
+  findingBody: { flex: 1, padding: 14 },
+  findingTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  findingComp: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+    textTransform: "capitalize",
+  },
+  findingSevBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  findingSevText: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
+  findingDesc: { fontSize: 13, color: "#64748B", lineHeight: 19 },
+
+  unitCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  unitAv: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  unitAvText: { fontSize: 20, fontWeight: "900", color: "#64748B" },
+  unitMid: { flex: 1 },
+  unitBrand: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  unitModelText: {
+    fontSize: 11,
+    color: "#94A3B8",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    marginTop: 2,
+  },
+  unitRight: { alignItems: "flex-end" },
+  unitTonnage: { fontSize: 18, fontWeight: "800", color: "#0F172A" },
+  unitRefrig: {
+    fontSize: 11,
+    color: "#06B6D4",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+
+  quickGrid: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  quickItem: {
+    flex: 1,
+    backgroundColor: "#FFF",
+    borderRadius: 14,
+    padding: 14,
+    alignItems: "center",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  quickCount: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
+  quickLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#94A3B8",
+    marginTop: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+
+  storyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0F172A",
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  storyBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF15",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storyBannerContent: { flex: 1 },
+  storyBannerTitle: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+  storyBannerSub: { fontSize: 12, color: "#64748B", marginTop: 2 },
+
+  gaugeSection: { marginBottom: 20 },
+  gaugeSectionTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+  gaugeRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
+  gaugeCard: {
+    flex: 1,
+    backgroundColor: "#FFF",
+    borderRadius: 14,
+    padding: 16,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  gaugeTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  gaugeLabel: { fontSize: 11, fontWeight: "600", color: "#94A3B8" },
+  gaugeDot: { width: 8, height: 8, borderRadius: 4 },
+  gaugeValRow: { flexDirection: "row", alignItems: "baseline" },
+  gaugeVal: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -1,
+  },
+  gaugeUnit: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#94A3B8",
+    marginLeft: 3,
+  },
+  gaugeTarget: {
+    fontSize: 10,
+    color: "#CBD5E1",
+    marginTop: 6,
+    fontWeight: "500",
+  },
+  readingTimestamp: {
+    fontSize: 11,
+    color: "#CBD5E1",
+    textAlign: "center",
+    marginTop: 4,
+  },
+
+  tlItem: { flexDirection: "row", minHeight: 72 },
+  tlLeft: { width: 36, alignItems: "center" },
+  tlDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#16A34A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tlLine: { width: 2, flex: 1, backgroundColor: "#E2E8F0", marginTop: 4 },
+  tlContent: { flex: 1, marginLeft: 12, paddingBottom: 20 },
+  tlTime: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#94A3B8",
+    marginBottom: 4,
+  },
+  tlDesc: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#0F172A",
+    lineHeight: 20,
+  },
+  tlQty: { fontSize: 12, color: "#64748B", marginTop: 4, fontWeight: "500" },
+  tlSectionDivider: {
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    marginTop: 8,
+  },
+  tlSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+  },
+
+  notePreview: {
+    flexDirection: "row",
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    gap: 10,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  notePreviewIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notePreviewContent: { flex: 1 },
+  notePreviewText: { fontSize: 13, color: "#334155", lineHeight: 19 },
+  notePreviewMeta: { fontSize: 11, color: "#CBD5E1", marginTop: 4 },
+  viewAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    gap: 4,
+  },
+  viewAllText: { fontSize: 13, fontWeight: "600", color: "#06B6D4" },
+
+  clipScroll: { gap: 10, paddingBottom: 4 },
+  clipThumb: {
+    width: 130,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#FFF",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  clipThumbBg: {
+    height: 80,
+    backgroundColor: "#1E293B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clipPlayBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF30",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  clipDurBadge: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    backgroundColor: "#00000080",
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  clipDurText: {
+    fontSize: 9,
+    color: "#FFF",
+    fontWeight: "600",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  clipThumbCap: {
+    fontSize: 11,
+    color: "#334155",
+    padding: 8,
+    fontWeight: "500",
+  },
+
+  photoThumb: {
+    width: 130,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#FFF",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  photoThumbBg: {
+    height: 80,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoThumbCap: {
+    fontSize: 11,
+    color: "#334155",
+    padding: 8,
+    fontWeight: "500",
+  },
+
+  reportCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 14,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  reportText: { fontSize: 14, color: "#475569", lineHeight: 22 },
+  emptyReport: { alignItems: "center", paddingVertical: 48, gap: 8 },
+  emptyReportTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#334155",
+    marginTop: 8,
+  },
+  emptyReportDesc: {
+    fontSize: 13,
+    color: "#94A3B8",
+    textAlign: "center",
+    maxWidth: 260,
+  },
+  reportBtns: { gap: 10, marginBottom: 20 },
+  reportBtnPrimary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0F172A",
+    borderRadius: 14,
+    paddingVertical: 15,
+    gap: 10,
+  },
+  reportBtnPrimaryText: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+  reportBtnSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 14,
+    paddingVertical: 15,
+    gap: 10,
+  },
+  reportBtnSecondaryText: { fontSize: 15, fontWeight: "600", color: "#0F172A" },
+
+  sigSection: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 18,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  sigSectionTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 14,
+  },
+  sigDone: { flexDirection: "row", alignItems: "center", gap: 10 },
+  sigDoneText: { fontSize: 15, fontWeight: "600", color: "#16A34A" },
+  sigCollectBtn: { flexDirection: "row", alignItems: "center", gap: 12 },
+  sigCollectContent: { flex: 1 },
+  sigCollectTitle: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
+  sigCollectDesc: { fontSize: 12, color: "#94A3B8", marginTop: 2 },
+
+  bottomBar: {
+    flexDirection: "row",
+    backgroundColor: "#FFF",
+    paddingTop: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    gap: 10,
+  },
+  bottomPrimary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0F172A",
+    borderRadius: 14,
+    paddingVertical: 15,
+    gap: 8,
+  },
+  bottomPrimaryText: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+  bottomSecondary: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  modalCont: { flex: 1, backgroundColor: "#FFF" },
+  modalHdr: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+  },
+  modalCancel: { fontSize: 16, color: "#64748B", fontWeight: "500" },
+  modalTitleText: { fontSize: 17, fontWeight: "700", color: "#0F172A" },
+  modalSend: { fontSize: 16, color: "#06B6D4", fontWeight: "700" },
+  modalBody: { padding: 20 },
+  modalLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#64748B",
+    marginBottom: 8,
+  },
+  modalInput: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: "#0F172A",
+  },
+  modalPrev: {
+    marginTop: 24,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 14,
+    padding: 16,
+  },
+  modalPrevHdr: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  modalPrevTitle: { fontSize: 13, fontWeight: "600", color: "#64748B" },
+  modalPrevText: { fontSize: 13, color: "#94A3B8", lineHeight: 20 },
+
+  sheet: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 40,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginBottom: 4,
+  },
+  sheetSubtitle: { fontSize: 13, color: "#94A3B8", marginBottom: 18 },
+  sheetInput: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 14,
+    color: "#0F172A",
+    minHeight: 120,
+    marginBottom: 20,
+  },
+  sheetBtnSecondary: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 14,
+    alignItems: "center",
+    backgroundColor: "#F1F5F9",
+  },
+  sheetBtnSecondaryText: { fontSize: 14, fontWeight: "700", color: "#64748B" },
+  sheetBtnPrimary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 15,
+    borderRadius: 14,
+    backgroundColor: "#0F172A",
+    gap: 6,
+  },
+  sheetBtnPrimaryText: { fontSize: 14, fontWeight: "700", color: "#FFF" },
+
+  focusBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  focusSheet: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    maxHeight: "80%",
+    backgroundColor: "#FFF",
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.35,
+    shadowRadius: 40,
+    elevation: 20,
+  },
+  focusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 20,
+  },
+  focusTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#0F172A",
+    textTransform: "capitalize",
+  },
+  focusSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  focusBody: { fontSize: 14, color: "#475569", lineHeight: 22 },
+  focusActionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 10,
+  },
+  focusActionNum: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#1E3A5F",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  focusActionNumText: { fontSize: 11, fontWeight: "800", color: "#FFF" },
+  focusActionText: {
+    flex: 1,
+    fontSize: 14,
+    color: "#334155",
+    lineHeight: 21,
+  },
+  focusPartRow: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  focusPartName: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  focusPartSpec: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  focusPartReason: { fontSize: 12, color: "#94A3B8", marginTop: 4 },
+  focusCloseBtn: {
+    marginTop: 20,
+    backgroundColor: "#1E3A5F",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  focusCloseText: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+});

@@ -6,23 +6,37 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  Modal,
+  Image,
+  StatusBar,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { FontAwesome } from "@expo/vector-icons";
+import { Video, ResizeMode } from "expo-av";
 import { useJobStore } from "../../store/jobStore";
 import GlassesViewer from "../../components/GlassesViewer";
+import { CLIP_VIDEOS, CLIP_THUMBS } from "../../data/clipAssets";
 
 /* ── Clips grid item ─────────────────────────────────────────── */
 
 function ClipThumb({
   caption,
   duration,
+  thumbnailAsset,
+  thumbnailUri,
   onPress,
 }: {
   caption: string;
   duration: number;
+  thumbnailAsset?: number;
+  thumbnailUri?: string;
   onPress: () => void;
 }) {
+  const imgSource = thumbnailAsset
+    ? thumbnailAsset
+    : thumbnailUri
+    ? { uri: thumbnailUri }
+    : null;
   const fmt =
     Math.floor(duration / 60) + ":" + (duration % 60).toString().padStart(2, "0");
   return (
@@ -30,33 +44,60 @@ function ClipThumb({
       <View
         style={{
           flex: 1,
-          backgroundColor: "#E5E7EB",
+          backgroundColor: "#0F172A",
           borderRadius: 8,
           overflow: "hidden",
           justifyContent: "center",
           alignItems: "center",
         }}
       >
-        <FontAwesome name="video-camera" size={20} color="#9CA3AF" />
-        <Text
-          style={{ color: "#6B7280", fontSize: 10, marginTop: 6 }}
-          numberOfLines={1}
+        {imgSource ? (
+          <Image
+            source={imgSource}
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+            resizeMode="cover"
+          />
+        ) : (
+          <FontAwesome name="video-camera" size={20} color="#9CA3AF" />
+        )}
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.18)",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
         >
-          {caption}
-        </Text>
+          <View
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              backgroundColor: "rgba(255,255,255,0.35)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <FontAwesome name="play" size={11} color="#FFF" />
+          </View>
+        </View>
         {duration > 0 && (
           <View
             style={{
               position: "absolute",
               bottom: 4,
               right: 4,
-              backgroundColor: "rgba(0,0,0,0.5)",
+              backgroundColor: "rgba(0,0,0,0.6)",
               borderRadius: 3,
               paddingHorizontal: 4,
               paddingVertical: 1,
             }}
           >
-            <Text style={{ color: "#fff", fontSize: 9, fontWeight: "500" }}>
+            <Text style={{ color: "#fff", fontSize: 9, fontWeight: "600" }}>
               {fmt}
             </Text>
           </View>
@@ -73,6 +114,9 @@ export default function HomeScreen() {
   const jobs = useJobStore((s) => s.jobs);
   const [isPaused, setIsPaused] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [playingClip, setPlayingClip] = useState<
+    { clip: any; jobId: string } | null
+  >(null);
 
   const handleSettings = () => {
     router.push("/(tabs)/settings");
@@ -369,12 +413,16 @@ export default function HomeScreen() {
                 overflow: "hidden",
               }}
             >
-              {previewClips.map(({ jobId, clip }, i) => (
+              {previewClips.map(({ clip, jobId }, i) => (
                 <View key={clip.id || i} style={{ width: "24.5%", aspectRatio: 1 }}>
                   <ClipThumb
                     caption={clip.caption}
                     duration={clip.duration_seconds}
-                    onPress={() => router.push(`/job/${jobId}`)}
+                    thumbnailAsset={CLIP_THUMBS[clip.id]}
+                    thumbnailUri={
+                      CLIP_THUMBS[clip.id] ? undefined : clip.thumbnail_path
+                    }
+                    onPress={() => setPlayingClip({ clip, jobId })}
                   />
                 </View>
               ))}
@@ -418,6 +466,116 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Clip Player Modal */}
+      <Modal
+        visible={playingClip !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPlayingClip(null)}
+        statusBarTranslucent
+      >
+        <StatusBar barStyle="light-content" />
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.95)",
+            justifyContent: "center",
+          }}
+        >
+          <Pressable
+            onPress={() => setPlayingClip(null)}
+            style={{
+              position: "absolute",
+              top: 56,
+              right: 20,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2,
+            }}
+            hitSlop={16}
+          >
+            <FontAwesome name="times" size={18} color="#FFF" />
+          </Pressable>
+
+          {playingClip && (
+            <>
+              <Video
+                source={
+                  CLIP_VIDEOS[playingClip.clip.id]
+                    ? CLIP_VIDEOS[playingClip.clip.id]
+                    : { uri: playingClip.clip.file_path }
+                }
+                style={{ width: "100%", aspectRatio: 16 / 9 }}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay
+                isLooping={false}
+              />
+              <View style={{ paddingHorizontal: 24, paddingTop: 20 }}>
+                <Text
+                  style={{
+                    color: "#FFF",
+                    fontSize: 15,
+                    fontWeight: "600",
+                    textAlign: "center",
+                  }}
+                >
+                  {playingClip.clip.caption}
+                </Text>
+                {playingClip.clip.recorded_by && (
+                  <Text
+                    style={{
+                      color: "rgba(255,255,255,0.5)",
+                      fontSize: 12,
+                      marginTop: 6,
+                      textAlign: "center",
+                    }}
+                  >
+                    {playingClip.clip.recorded_by} ·{" "}
+                    {Math.floor(playingClip.clip.duration_seconds / 60)}:
+                    {(playingClip.clip.duration_seconds % 60)
+                      .toString()
+                      .padStart(2, "0")}
+                  </Text>
+                )}
+                <Pressable
+                  onPress={() => {
+                    const jobId = playingClip.jobId;
+                    setPlayingClip(null);
+                    router.push(`/job/${jobId}`);
+                  }}
+                  style={{
+                    marginTop: 20,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: "#FFFFFF",
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    gap: 8,
+                  }}
+                >
+                  <FontAwesome name="arrow-right" size={13} color="#0F172A" />
+                  <Text
+                    style={{
+                      color: "#0F172A",
+                      fontSize: 14,
+                      fontWeight: "700",
+                    }}
+                  >
+                    Go to Job Detail
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }

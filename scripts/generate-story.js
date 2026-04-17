@@ -19,10 +19,11 @@ const {
   FileState,
 } = require("@google/generative-ai");
 
+require("dotenv").config({ path: path.join(__dirname, "..", "server", ".env") });
 const GEMINI_API_KEY =
   process.argv.find((a, i) => process.argv[i - 1] === "--key") ||
-  process.env.GEMINI_API_KEY ||
-  "AIzaSyD9V_kjdfuN_FWO0Hvnw63IVfJOTgJ3x2s";
+  process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY missing (set it in server/.env, export it, or pass --key)");
 
 const VIDEO_PATH = process.argv[2];
 
