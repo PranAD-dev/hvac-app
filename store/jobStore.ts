@@ -91,10 +91,13 @@ export const useJobStore = create<JobStore>((set, get) => ({
   searchJobs: (query: string) => {
     const q = query.toLowerCase().trim();
     if (!q) return get().jobs;
+    const digits = q.replace(/\D/g, "");
     return get().jobs.filter(
       (j) =>
         j.customer_address.toLowerCase().includes(q) ||
         j.customer_name.toLowerCase().includes(q) ||
+        (digits.length > 0 &&
+          (j.customer_phone || "").replace(/\D/g, "").includes(digits)) ||
         j.unit.model_number.toLowerCase().includes(q) ||
         j.unit.serial_number.toLowerCase().includes(q) ||
         j.unit.brand.toLowerCase().includes(q) ||
