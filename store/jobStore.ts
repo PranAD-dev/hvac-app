@@ -18,6 +18,7 @@ interface JobStore {
   loadSeedData: () => Promise<void>;
   clearAllData: () => Promise<void>;
   setTechName: (name: string) => Promise<void>;
+  getJobById: (id: string) => Job | undefined;
   getJobsBySerialNumber: (serial: string) => Job[];
   searchJobs: (query: string) => Job[];
   addNote: (jobId: string, text: string, source: "manual" | "vision", createdBy: string) => Promise<void>;
@@ -77,6 +78,10 @@ export const useJobStore = create<JobStore>((set, get) => ({
     } catch (e) {
       console.error("Failed to save tech name:", e);
     }
+  },
+
+  getJobById: (id: string) => {
+    return get().jobs.find((j) => j.id === id);
   },
 
   getJobsBySerialNumber: (serial: string) => {
