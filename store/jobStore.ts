@@ -20,6 +20,7 @@ interface JobStore {
   setTechName: (name: string) => Promise<void>;
   getJobById: (id: string) => Job | undefined;
   getJobsBySerialNumber: (serial: string) => Job[];
+  getJobStats: () => { total: number; inProgress: number; completed: number; emergency: number };
   searchJobs: (query: string) => Job[];
   addNote: (jobId: string, text: string, source: "manual" | "vision", createdBy: string) => Promise<void>;
   updateNote: (jobId: string, noteId: string, text: string) => Promise<void>;
@@ -91,6 +92,19 @@ export const useJobStore = create<JobStore>((set, get) => ({
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
+  },
+
+  getJobStats: () => {
+    const jobs = get().jobs;
+    let inProgress = 0;
+    let completed = 0;
+    let emergency = 0;
+    for (const j of jobs) {
+      if (j.status === "completed") completed++;
+      else if (j.status === "in_progress") inProgress++;
+      if (j.diagnosis.urgency === "emergency") emergency++;
+    }
+    return { total: jobs.length, inProgress, completed, emergency };
   },
 
   searchJobs: (query: string) => {
